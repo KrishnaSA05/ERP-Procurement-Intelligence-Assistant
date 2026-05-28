@@ -19,6 +19,7 @@ build/
 
 # Data (don't commit generated/sensitive data)
 data/contracts/*.pdf
+data/policies/*.pdf
 data/synthetic/*.csv
 *.db
 
