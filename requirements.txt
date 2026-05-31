@@ -18,7 +18,7 @@ unstructured==0.15.0
 
 # ── Embeddings ────────────────────────────────────────────────────────────────
 sentence-transformers==3.0.1
-boto3==1.35.8                  # for Bedrock + S3 + Lambda
+boto3==1.34.160                  # for Bedrock + S3 + Lambda
 
 # ── Evaluation ────────────────────────────────────────────────────────────────
 ragas==0.1.21
