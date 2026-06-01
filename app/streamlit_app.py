@@ -38,6 +38,7 @@ st.set_page_config(
 )
 
 API_URL = "http://localhost:8000"
+#API_URL = os.environ.get("API_URL", "http://api:8000") Used when deployed online
 
 
 # ── Styling ───────────────────────────────────────────────────────────────────
