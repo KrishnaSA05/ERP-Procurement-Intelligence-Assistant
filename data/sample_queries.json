@@ -1,93 +1,121 @@
 [
   {
-    "id": "Q001",
-    "question": "What is our total open PO value for IT Services vendors this quarter?",
+    "id": "sql_001",
     "route": "sql",
-    "expected_contains": ["total", "open", "IT Services"],
-    "ground_truth": "Query should sum purchase_orders.amount where status='open' and category='IT Services', filtered to current quarter."
+    "category": "Vendor Analysis",
+    "question": "Which vendor category has the highest average PO value?",
+    "ground_truth": "Facilities has the highest average PO value among all vendor categories."
   },
   {
-    "id": "Q002",
-    "question": "Which vendors have overdue invoices greater than 30 days?",
+    "id": "sql_002",
     "route": "sql",
-    "expected_contains": ["vendor", "overdue", "invoice"],
-    "ground_truth": "Query should join invoices with purchase_orders and vendors, filtering invoices where status='overdue' and (today - due_date) > 30."
+    "category": "Invoice Management",
+    "question": "How many invoices are currently overdue?",
+    "ground_truth": "There are overdue invoices in the system where the status is overdue or the due date has passed without payment."
   },
   {
-    "id": "Q003",
-    "question": "Show me the top 5 vendors by total PO value in 2024.",
+    "id": "sql_003",
     "route": "sql",
-    "expected_contains": ["vendor", "PO", "total"],
-    "ground_truth": "Query should group purchase_orders by vendor_id, sum amounts for po_date in 2024, join with vendors for names, order desc, limit 5."
+    "category": "Spend Analysis",
+    "question": "Who are the top 5 vendors by total PO value?",
+    "ground_truth": "The top 5 vendors by total purchase order value are listed with their respective total amounts in USD."
   },
   {
-    "id": "Q004",
-    "question": "What is the average vendor rating for Consulting category suppliers?",
+    "id": "sql_004",
     "route": "sql",
-    "expected_contains": ["rating", "Consulting", "average"],
-    "ground_truth": "SELECT AVG(rating) FROM vendors WHERE category='Consulting'"
+    "category": "Vendor Analysis",
+    "question": "How many active vendors do we have per country?",
+    "ground_truth": "The system contains active vendors distributed across multiple countries including the United States, Germany, India, and others."
   },
   {
-    "id": "Q005",
-    "question": "How many purchase orders were cancelled in the last 6 months?",
+    "id": "sql_005",
     "route": "sql",
-    "expected_contains": ["cancelled", "purchase orders"],
-    "ground_truth": "SELECT COUNT(*) FROM purchase_orders WHERE status='cancelled' AND po_date >= CURRENT_DATE - INTERVAL '6 months'"
+    "category": "Purchase Orders",
+    "question": "What is the total value of open purchase orders for IT Services vendors?",
+    "ground_truth": "The total value of open purchase orders for IT Services category vendors is a sum of all POs with open status."
   },
   {
-    "id": "Q006",
-    "question": "Does the vendor contract include a late delivery penalty clause?",
+    "id": "sql_006",
+    "route": "sql",
+    "category": "Invoice Management",
+    "question": "Show all invoices overdue by more than 30 days grouped by vendor category.",
+    "ground_truth": "Invoices overdue by more than 30 days are grouped by vendor category showing the count and total overdue amount per category."
+  },
+  {
+    "id": "sql_007",
+    "route": "sql",
+    "category": "Spend Analysis",
+    "question": "What is the average PO value for Consulting vendors?",
+    "ground_truth": "The average purchase order value for Consulting category vendors is approximately $94,000 to $95,000."
+  },
+  {
+    "id": "rag_001",
     "route": "rag",
-    "expected_contains": ["penalty", "late delivery", "clause"],
-    "ground_truth": "Should retrieve contract chunks related to penalty clauses and late delivery terms from vendor contract PDFs."
+    "category": "Contract Terms",
+    "question": "What are the payment terms in the Alpha Tech contract?",
+    "ground_truth": "The Alpha Tech contract requires the Buyer to pay the Vendor within 30 days of receipt of a valid invoice. Late payments accrue interest at 1.5% per month on the outstanding balance. Invoices submitted after the 25th of any calendar month are processed in the following payment cycle."
   },
   {
-    "id": "Q007",
-    "question": "What is the policy for single-source procurement above $100,000?",
+    "id": "rag_002",
     "route": "rag",
-    "expected_contains": ["single-source", "sole source", "100,000", "approval"],
-    "ground_truth": "Should retrieve procurement policy chunks related to sole/single source justification thresholds and approval requirements."
+    "category": "Contract Terms",
+    "question": "Does the Beta Logistics contract include a late delivery penalty clause?",
+    "ground_truth": "The Beta Logistics contract includes provisions regarding late delivery, requiring the vendor to notify the buyer in writing within 24 hours of identifying any risk of late delivery."
   },
   {
-    "id": "Q008",
-    "question": "What are the payment terms specified in the standard vendor contract?",
+    "id": "rag_003",
     "route": "rag",
-    "expected_contains": ["payment terms", "days", "invoice"],
-    "ground_truth": "Should retrieve contract sections covering payment schedule, net terms, and invoicing requirements."
+    "category": "Procurement Policy",
+    "question": "What is the policy for single-source procurement?",
+    "ground_truth": "The procurement policy outlines conditions under which single-source procurement is permitted, including approval thresholds and justification requirements."
   },
   {
-    "id": "Q009",
-    "question": "What are the termination for convenience conditions in the contract?",
+    "id": "rag_004",
     "route": "rag",
-    "expected_contains": ["termination", "convenience", "notice"],
-    "ground_truth": "Should retrieve contract sections on termination clauses, notice periods, and settlement conditions."
+    "category": "Contract Terms",
+    "question": "What happens if a vendor terminates the contract early?",
+    "ground_truth": "The contracts contain termination clauses that specify notice periods and financial consequences for early termination by either party."
   },
   {
-    "id": "Q010",
-    "question": "What does the procurement policy say about vendor conflict of interest?",
+    "id": "rag_005",
     "route": "rag",
-    "expected_contains": ["conflict of interest", "vendor", "policy"],
-    "ground_truth": "Should retrieve policy document sections covering conflict of interest rules for vendor selection and procurement decisions."
+    "category": "Contract Terms",
+    "question": "Is there a force majeure clause in the vendor contracts?",
+    "ground_truth": "The vendor contracts contain force majeure provisions that excuse performance obligations under extraordinary circumstances beyond the control of either party."
   },
   {
-    "id": "Q011",
-    "question": "Which vendors have open POs above $50,000 and no late delivery penalty clause in their contract?",
+    "id": "rag_006",
+    "route": "rag",
+    "category": "Procurement Policy",
+    "question": "What are the approval thresholds for purchase orders according to procurement policy?",
+    "ground_truth": "The procurement policy defines approval thresholds at different levels, requiring higher-level authorization for purchase orders above certain monetary limits."
+  },
+  {
+    "id": "hybrid_001",
     "route": "hybrid",
-    "expected_contains": ["open PO", "50,000", "penalty", "vendor"],
-    "ground_truth": "SQL agent retrieves vendors with open POs > 50K. RAG agent checks contracts for penalty clauses. Synthesis agent combines both results."
+    "category": "Hybrid Analysis",
+    "question": "Summarize our IT Services spending and any relevant contract obligations.",
+    "ground_truth": "The IT Services category has significant total spend across multiple vendors. The relevant contracts outline 30-day payment terms with 1.5% monthly late payment interest, and vendors must notify buyers within 24 hours of any delivery risk."
   },
   {
-    "id": "Q012",
-    "question": "Which Logistics vendors are onboarded from Germany and what are their contract payment terms?",
+    "id": "hybrid_002",
     "route": "hybrid",
-    "expected_contains": ["Logistics", "Germany", "payment terms"],
-    "ground_truth": "SQL agent retrieves Logistics vendors from Germany. RAG agent retrieves payment terms from contracts. Synthesis combines both."
+    "category": "Hybrid Analysis",
+    "question": "Which vendors have open POs above 50000 and what do their contracts say about payment terms?",
+    "ground_truth": "Several vendors have open purchase orders exceeding $50,000. The relevant contracts specify payment terms including invoice processing timelines, late payment penalties, and notification requirements."
   },
   {
-    "id": "Q013",
-    "question": "What is our total spend on IT Services this year, and what does our policy say about IT procurement thresholds?",
+    "id": "hybrid_003",
     "route": "hybrid",
-    "expected_contains": ["IT Services", "spend", "threshold", "policy"],
-    "ground_truth": "SQL agent returns total IT spend. RAG agent retrieves policy thresholds for IT procurement. Synthesis merges both."
+    "category": "Hybrid Analysis",
+    "question": "How much do we spend on logistics and what are the contract payment terms for logistics vendors?",
+    "ground_truth": "Logistics category vendors account for significant total spend. The Beta Logistics contract specifies payment terms and delivery penalty provisions that apply to this spending."
+  },
+  {
+    "id": "hybrid_004",
+    "route": "hybrid",
+    "category": "Hybrid Analysis",
+    "question": "Which vendors have overdue invoices and what do the contracts say about late payment interest?",
+    "ground_truth": "Multiple vendors have overdue invoices. The Alpha Tech contract specifies that late payments accrue interest at 1.5% per month on the outstanding balance, with vendors required to provide written notice within 15 days of the payment due date."
   }
 ]

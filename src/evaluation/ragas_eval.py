@@ -41,10 +41,10 @@ from loguru import logger
 # RAGAS imports
 from ragas import evaluate
 from ragas.metrics import (
-    faithfulness,
-    answer_relevancy,
-    context_precision,
-    context_recall,
+    Faithfulness,
+    AnswerRelevancy,
+    ContextPrecision,
+    ContextRecall,
 )
 from datasets import Dataset
 
@@ -230,6 +230,67 @@ def collect_eval_samples(
 
 # ── RAGAS evaluation ──────────────────────────────────────────────────────────
 
+# ── RAGAS judge LLM factory ───────────────────────────────────────────────────
+
+def _judge_backend() -> str:
+    """Return which backend will be used as RAGAS judge."""
+    if os.getenv("GROQ_API_KEY"):
+        return "Groq llama-3.3-70b-versatile (free)"
+    if os.getenv("OPENAI_API_KEY"):
+        return "OpenAI gpt-3.5-turbo (~$0.05)"
+    return "none configured"
+
+
+def _get_ragas_judge_llm():
+    """
+    Return a RAGAS-compatible LLM wrapper.
+    Uses Groq if GROQ_API_KEY is set, falls back to OpenAI.
+    Raises EnvironmentError if neither key is available.
+    """
+    from ragas.llms import LangchainLLMWrapper
+
+    groq_key  = os.getenv("GROQ_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+
+    if groq_key:
+        from langchain_groq import ChatGroq
+        # Use the larger 70b model for better judge quality
+        llm = ChatGroq(
+            model       = os.getenv("GROQ_JUDGE_MODEL", "llama-3.3-70b-versatile"),
+            api_key     = groq_key,
+            temperature = 0.0,
+        )
+        logger.info("RAGAS judge LLM: Groq llama-3.3-70b-versatile (free)")
+        return LangchainLLMWrapper(llm)
+
+    if openai_key:
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)
+        logger.info("RAGAS judge LLM: OpenAI gpt-3.5-turbo")
+        return LangchainLLMWrapper(llm)
+
+    raise EnvironmentError(
+        "\n\nNo LLM API key found for RAGAS judge.\n"
+        "Option 1 (free):  set GROQ_API_KEY in .env  — already set if pipeline works\n"
+        "Option 2 (paid):  set OPENAI_API_KEY in .env — get key at platform.openai.com\n"
+        "GROQ_API_KEY is recommended — it\'s free and already in your project."
+    )
+
+
+def _get_ragas_embeddings():
+    """
+    Return a RAGAS-compatible embeddings wrapper.
+    Uses sentence-transformers locally (no API key needed).
+    """
+    from ragas.embeddings import LangchainEmbeddingsWrapper
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+
+    logger.info("RAGAS embeddings: sentence-transformers/all-MiniLM-L6-v2 (local)")
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    return LangchainEmbeddingsWrapper(embeddings)
+
+
+
 def run_ragas(samples: list[EvalSample]) -> dict:
     """
     Run RAGAS evaluation on a list of EvalSamples.
@@ -241,6 +302,12 @@ def run_ragas(samples: list[EvalSample]) -> dict:
         Dict with metric scores (faithfulness, answer_relevancy,
         context_precision, context_recall)
     """
+    # FIX 1: Build the judge LLM for RAGAS.
+    # Priority: Groq (free, already configured) → OpenAI (fallback).
+    # RAGAS 0.1.x accepts any LangChain LLM via LangchainLLMWrapper.
+    judge_llm        = _get_ragas_judge_llm()
+    judge_embeddings = _get_ragas_embeddings()
+
     # Filter to samples with contexts (RAG + hybrid)
     rag_samples = [
         s for s in samples
@@ -269,21 +336,27 @@ def run_ragas(samples: list[EvalSample]) -> dict:
     dataset = Dataset.from_dict(data)
 
     # Run evaluation
+    logger.info(f"(RAGAS judge: {_judge_backend()} — scoring {len(rag_samples)} samples)")
+    # FIX 2: raise_exceptions=False — one bad sample won't abort the whole run
     result = evaluate(
         dataset,
         metrics=[
-            faithfulness,
-            answer_relevancy,
-            context_precision,
-            context_recall,
+            Faithfulness(),
+            AnswerRelevancy(),
+            ContextPrecision(),
+            ContextRecall(),
         ],
+        llm          = judge_llm,
+        embeddings   = judge_embeddings,
+        raise_exceptions=False,
     )
 
+    # ragas 0.2.x returns scores as a dict-like object with lowercase keys
     scores = {
-        "faithfulness"     : round(float(result["faithfulness"]),      4),
-        "answer_relevancy" : round(float(result["answer_relevancy"]),  4),
-        "context_precision": round(float(result["context_precision"]), 4),
-        "context_recall"   : round(float(result["context_recall"]),    4),
+        "faithfulness"     : round(float(result.get("faithfulness",      result.get("Faithfulness",      0))), 4),
+        "answer_relevancy" : round(float(result.get("answer_relevancy",  result.get("AnswerRelevancy",   0))), 4),
+        "context_precision": round(float(result.get("context_precision", result.get("ContextPrecision",  0))), 4),
+        "context_recall"   : round(float(result.get("context_recall",    result.get("ContextRecall",     0))), 4),
     }
 
     logger.success(f"RAGAS scores: {scores}")
@@ -345,7 +418,7 @@ def run_evaluation(
         sum(s.latency_ms for s in successful) / len(successful)
         if successful else 0.0
     )
-    rag_samples  = [s for s in samples if s.route in ("rag", "hybrid")]
+    rag_samples_list = [s for s in samples if s.route in ("rag", "hybrid")]
 
     results = EvalResults(
         faithfulness       = scores["faithfulness"],
@@ -353,7 +426,7 @@ def run_evaluation(
         context_precision  = scores["context_precision"],
         context_recall     = scores["context_recall"],
         n_samples          = len(samples),
-        n_rag_samples      = len(rag_samples),
+        n_rag_samples      = len(rag_samples_list),
         avg_latency_ms     = round(avg_latency, 1),
         timestamp          = datetime.now(timezone.utc).isoformat(),
         samples            = samples,
