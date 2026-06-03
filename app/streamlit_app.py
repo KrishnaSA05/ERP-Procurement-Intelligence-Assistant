@@ -54,13 +54,17 @@ st.markdown("""
                  border-radius:12px; font-size:12px; font-weight:600; }
 
 /* Answer card */
-.answer-card   { background:#f8f9fa; border-left:4px solid #1a6de0;
+.answer-card   { background:#1e2130; color:#e8eaf0 !important;
+                 border-left:4px solid #1a6de0;
                  padding:16px 20px; border-radius:4px; margin:8px 0; }
+.answer-card * { color:#e8eaf0 !important; }
 
 /* Citation card */
-.citation-card { background:#ffffff; border:1px solid #dee2e6;
+.citation-card { background:#252839; color:#c8cad4 !important;
+                 border:1px solid #3a3f55;
                  padding:10px 14px; border-radius:4px; margin:4px 0;
                  font-size:13px; }
+.citation-card * { color:#c8cad4 !important; }
 
 /* Metric tile */
 .metric-tile   { text-align:center; }

@@ -72,11 +72,14 @@ HYBRID → The question requires BOTH structured ERP data AND document content:
         - Combines a database query with a contract/policy lookup
         Examples: "which vendors have open POs above 50K AND no penalty clause"
                   "what is our IT spend AND what does policy say about IT thresholds"
+                  "summarize our IT Services spending and any relevant contract obligations"
+                  "how much do we spend on logistics and what are the contract payment terms"
 
 IMPORTANT RULES:
   - If the question mentions vendors by name AND asks about contract terms → HYBRID
   - If the question asks for numbers/amounts/counts/lists → SQL (or HYBRID if also asks about clauses)
   - If the question asks "what does...say" or "is there a clause" → RAG
+  - If the question asks about BOTH spending/amounts AND contracts/obligations/policy → HYBRID
   - When in doubt between SQL and HYBRID, choose HYBRID (safer)
 
 Respond ONLY with a JSON object in this exact format (no markdown, no preamble):
@@ -142,33 +145,53 @@ def classify_query(query: str) -> RouteDecision:
 
 # ── Rule-based fallback (no LLM needed for obvious cases) ────────────────────
 
-_SQL_KEYWORDS = [
-    "total", "count", "sum", "average", "how many", "list all",
-    "top ", "show all", "overdue by", "grouped by", "this quarter",
-    "last month", "in 2024", "in 2023", "vendor rating", "onboarded",
+# FIX: SQL keywords are now whole-word patterns (not substrings).
+# "sum" was matching "summarize"; "total" was fine but "count" could match
+# "account". Using \b word boundaries via re.search() eliminates false hits.
+_SQL_WORD_KEYWORDS = [
+    r"\btotal\b", r"\bcount\b", r"\bhow many\b", r"\bhow much\b",
+    r"\blist all\b", r"\btop \d", r"\bshow all\b", r"\boverdue\b",
+    r"\bgrouped by\b", r"\bthis quarter\b", r"\blast month\b",
+    r"\blast quarter\b", r"\bin 2024\b", r"\bin 2023\b",
+    r"\bvendor rating\b", r"\bonboarded\b", r"\bspend\b",
+    r"\bspending\b", r"\bexpenditure\b", r"\bpurchase order\b",
+    r"\bopen po\b", r"\bpo value\b", r"\bpo count\b", r"\baverage po\b",
+    r"\binvoice\b", r"\b\d+k\b", r"\bbudget\b", r"\bamount\b",
 ]
 
-_RAG_KEYWORDS = [
-    "contract say", "policy say", "clause", "penalty", "termination",
-    "payment terms", "force majeure", "what does", "is there a",
-    "according to", "under the contract", "compliance", "policy for",
-    "single-source", "sole source", "conflict of interest",
+# FIX: RAG keywords now include standalone "contract", "policy", "obligation"
+# so hybrid queries like "...contract obligations" are caught correctly.
+_RAG_WORD_KEYWORDS = [
+    r"\bcontract\b", r"\bpolicy\b", r"\bobligation\b", r"\bclause\b",
+    r"\bpenalty\b", r"\btermination\b", r"\bpayment terms\b",
+    r"\bforce majeure\b", r"\bwhat does\b", r"\bwhat do.*say\b",
+    r"\bis there a\b", r"\baccording to\b", r"\bunder the contract\b",
+    r"\bcompliance\b", r"\bprocurement rule\b", r"\bsingle.source\b",
+    r"\bsole source\b", r"\bconflict of interest\b", r"\bsla\b",
+    r"\bindemnif\b", r"\bliabilit\b", r"\bwarranty\b",
 ]
+
+
+def _matches_any(patterns: list[str], text: str) -> bool:
+    """Return True if any regex pattern matches in text (case-insensitive)."""
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
 
 def classify_query_fast(query: str) -> RouteDecision | None:
     """
     Rule-based classifier for obvious cases — skips LLM call entirely.
     Returns None if ambiguous (fall through to LLM classifier).
-    Used as a pre-filter to reduce Bedrock API calls.
-    """
-    q_lower = query.lower()
+    Used as a pre-filter to reduce API calls.
 
-    has_sql = any(kw in q_lower for kw in _SQL_KEYWORDS)
-    has_rag = any(kw in q_lower for kw in _RAG_KEYWORDS)
+    FIX: Uses regex word-boundary matching instead of plain substring checks
+    to prevent false positives like "sum" matching "summarize".
+    """
+    has_sql = _matches_any(_SQL_WORD_KEYWORDS, query)
+    has_rag = _matches_any(_RAG_WORD_KEYWORDS, query)
 
     if has_sql and has_rag:
         return RouteDecision(Route.HYBRID, 0.85,
-                             "Contains both data and document keywords.", query)
+                             "Contains both structured-data and document keywords.", query)
     if has_sql and not has_rag:
         return RouteDecision(Route.SQL, 0.85,
                              "Contains structured data keywords.", query)
@@ -209,6 +232,9 @@ if __name__ == "__main__":
         "What is our policy for single-source procurement above 100K?",
         "Show all invoices overdue by more than 30 days grouped by category.",
         "What are the payment terms in the contract and how much do we owe vendor X?",
+        "Summarize our IT Services spending and any relevant contract obligations",
+        "How much do we spend on logistics and what are the contract payment terms?",
+        "Which vendor category has the highest average PO value?",
     ]
 
     print(f"\n{'='*60}")

@@ -30,6 +30,7 @@ import re
 import json
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import text
@@ -81,6 +82,9 @@ RULES:
    Example: ROUND(AVG(po.amount)::numeric, 2), ROUND(SUM(po.amount)::numeric, 2)
    PostgreSQL's ROUND(x, n) requires numeric type; float/double precision must be cast explicitly.
 8. Return ONLY the raw SQL query — no explanation, no markdown, no semicolons at the end.
+9. For spending/summary questions, use simple aggregation on vendors + purchase_orders only.
+   Do NOT join spend_analysis with purchase_orders — use spend_analysis standalone for trend data.
+   Do NOT add quarter/date filters unless the question explicitly asks for a time period.
 
 Today's date: {date.today().isoformat()}"""
 
@@ -157,6 +161,8 @@ class SQLAgent:
                         # Serialise non-JSON-native types
                         if isinstance(val, date):
                             row_dict[col] = val.isoformat()
+                        elif isinstance(val, Decimal):
+                            row_dict[col] = float(val)
                         elif val is None:
                             row_dict[col] = None
                         else:
