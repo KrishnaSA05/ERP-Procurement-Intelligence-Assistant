@@ -75,9 +75,9 @@ st.markdown("""
 
 # ── Session state ─────────────────────────────────────────────────────────────
 
-if "messages"     not in st.session_state: st.session_state.messages     = []
-if "query_count"  not in st.session_state: st.session_state.query_count  = 0
-if "total_latency"not in st.session_state: st.session_state.total_latency= 0.0
+if "messages"      not in st.session_state: st.session_state.messages      = []
+if "query_count"   not in st.session_state: st.session_state.query_count   = 0
+if "total_latency" not in st.session_state: st.session_state.total_latency = 0.0
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -126,6 +126,68 @@ def route_badge(route: str) -> str:
         "hybrid": '<span class="badge-hybrid">🔀 ERP + Documents</span>',
     }
     return badges.get(route, route)
+
+
+# ── Answer renderer ───────────────────────────────────────────────────────────
+# FIX: defined here (before first use) so it is available when the chat
+#      history loop replays previous messages on every Streamlit re-run.
+
+def _render_answer(data: dict):
+    """Render a full answer card with badges, citations, SQL, and data table."""
+
+    route = data.get("route_used", "")
+
+    # Route badge + latency
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(route_badge(route), unsafe_allow_html=True)
+    with col2:
+        ms = data.get("latency_ms")
+        if ms:
+            st.caption(f"⏱ {ms:.0f}ms")
+
+    # Main answer
+    st.markdown(
+        f'<div class="answer-card">{data.get("final_answer", "")}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # SQL transparency
+    sql = data.get("sql_query")
+    if sql:
+        with st.expander("🔎 SQL Query Used"):
+            st.code(sql, language="sql")
+
+    # Data table
+    rows = data.get("data_rows", [])
+    if rows:
+        with st.expander(f"📋 Data ({len(rows)} rows)"):
+            import pandas as pd
+            st.dataframe(
+                pd.DataFrame(rows),
+                use_container_width = True,
+                hide_index          = True,
+            )
+
+    # Citations
+    citations = data.get("citations", [])
+    if citations:
+        with st.expander(f"📚 Sources ({len(citations)} documents)"):
+            for i, c in enumerate(citations, 1):
+                sim_pct = int(c.get("similarity", 0) * 100)
+                sim_bar = "█" * (sim_pct // 10) + "░" * (10 - sim_pct // 10)
+
+                st.markdown(
+                    f'<div class="citation-card">'
+                    f'<b>[{i}] {c.get("source_file","")}</b> '
+                    f'— page {c.get("page_number","")} '
+                    f'— {c.get("doc_type","").upper()}<br>'
+                    f'<span style="color:#888;font-size:11px">'
+                    f'Relevance: {sim_bar} {sim_pct}%</span><br>'
+                    f'<i>"{c.get("excerpt","")[:180]}..."</i>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -222,6 +284,7 @@ st.caption(
 )
 
 # ── Chat history ──────────────────────────────────────────────────────────────
+# FIX: _render_answer is now defined above, so this loop works correctly.
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -231,69 +294,6 @@ for msg in st.session_state.messages:
             # Assistant message — render full response card
             data = msg.get("data", {})
             _render_answer(data) if data else st.markdown(msg["content"])
-
-
-def _render_answer(data: dict):
-    """Render a full answer card with badges, citations, SQL, and data table."""
-
-    route = data.get("route_used", "")
-
-    # Route badge + latency
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown(route_badge(route), unsafe_allow_html=True)
-    with col2:
-        ms = data.get("latency_ms")
-        if ms:
-            st.caption(f"⏱ {ms:.0f}ms")
-
-    # Main answer
-    st.markdown(
-        f'<div class="answer-card">{data.get("final_answer", "")}</div>',
-        unsafe_allow_html=True,
-    )
-
-    # SQL transparency
-    sql = data.get("sql_query")
-    if sql:
-        with st.expander("🔎 SQL Query Used"):
-            st.code(sql, language="sql")
-
-    # Data table
-    rows = data.get("data_rows", [])
-    if rows:
-        with st.expander(f"📋 Data ({len(rows)} rows)"):
-            import pandas as pd
-            st.dataframe(
-                pd.DataFrame(rows),
-                use_container_width = True,
-                hide_index          = True,
-            )
-
-    # Citations
-    citations = data.get("citations", [])
-    if citations:
-        with st.expander(f"📚 Sources ({len(citations)} documents)"):
-            for i, c in enumerate(citations, 1):
-                sim_pct = int(c.get("similarity", 0) * 100)
-                sim_bar = "█" * (sim_pct // 10) + "░" * (10 - sim_pct // 10)
-
-                st.markdown(
-                    f'<div class="citation-card">'
-                    f'<b>[{i}] {c.get("source_file","")}</b> '
-                    f'— page {c.get("page_number","")} '
-                    f'— {c.get("doc_type","").upper()}<br>'
-                    f'<span style="color:#888;font-size:11px">'
-                    f'Relevance: {sim_bar} {sim_pct}%</span><br>'
-                    f'<i>"{c.get("excerpt","")[:180]}..."</i>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-
-# Patch session rendering to use _render_answer
-for msg in st.session_state.messages:
-    pass  # already rendered above, _render_answer available from here
 
 
 # ── Input ─────────────────────────────────────────────────────────────────────
@@ -317,8 +317,8 @@ if question:
     # Call API
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            t0   = time.time()
-            data = call_api(question)
+            t0      = time.time()
+            data    = call_api(question)
             elapsed = round((time.time() - t0) * 1000)
 
         if data:

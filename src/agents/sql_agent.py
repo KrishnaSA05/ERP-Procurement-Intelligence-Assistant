@@ -77,7 +77,9 @@ RULES:
    AND EXTRACT(YEAR FROM po.po_date) = EXTRACT(YEAR FROM CURRENT_DATE)
 5. For "overdue invoices": status = 'overdue' OR (status != 'paid' AND due_date < CURRENT_DATE)
 6. Always include vendor name in results (JOIN vendors) when querying purchase_orders or invoices.
-7. Format money columns with ROUND(..., 2).
+7. Format money columns with ROUND(expression::numeric, 2) — always cast to numeric first.
+   Example: ROUND(AVG(po.amount)::numeric, 2), ROUND(SUM(po.amount)::numeric, 2)
+   PostgreSQL's ROUND(x, n) requires numeric type; float/double precision must be cast explicitly.
 8. Return ONLY the raw SQL query — no explanation, no markdown, no semicolons at the end.
 
 Today's date: {date.today().isoformat()}"""
@@ -222,7 +224,9 @@ class SQLAgent:
         data, error = self._execute_sql(sql)
 
         if error:
-            # Retry once with error context
+            # Retry once with error context.
+            # FIX: prompt explicitly demands only SQL — no explanation text —
+            # which previously caused a second syntax error on retry.
             logger.warning(f"  Retrying SQL after error: {error}")
             retry_messages = [
                 SystemMessage(content=SQL_GENERATION_SYSTEM),
@@ -230,12 +234,25 @@ class SQLAgent:
                     f"Question: {question}\n\n"
                     f"Previous attempt generated this SQL:\n{sql}\n\n"
                     f"It produced this error: {error}\n\n"
-                    f"Fix the SQL query:"
+                    f"Return ONLY the corrected SQL query. "
+                    f"No explanation, no comments, no text before or after the SQL."
                 )),
             ]
             try:
                 fixed = self._llm_sql.invoke(retry_messages).content.strip()
-                fixed = re.sub(r"```sql|```", "", fixed).strip().rstrip(";")
+                # Strip markdown fences
+                fixed = re.sub(r"```sql|```", "", fixed).strip()
+                # FIX: extract only the SELECT/WITH block — drop any prose the
+                # LLM appended after the query (e.g. "The error indicates...")
+                match = re.search(
+                    r"((?:WITH|SELECT)\b.*)",
+                    fixed,
+                    re.IGNORECASE | re.DOTALL,
+                )
+                if match:
+                    fixed = match.group(1).strip()
+                fixed = fixed.rstrip(";").strip()
+                logger.debug(f"  Retry SQL:\n{fixed}")
                 data, error = self._execute_sql(fixed)
                 sql = fixed
             except Exception as retry_e:

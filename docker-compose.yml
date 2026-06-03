@@ -23,7 +23,7 @@ services:
 
   # ── ChromaDB (vector store for contracts + policies) ────────────────────────
   chromadb:
-    image: chromadb/chroma:chroma:0.5.5
+    image: chromadb/chroma:0.5.5
     container_name: erp_chromadb
     restart: unless-stopped
     ports:
