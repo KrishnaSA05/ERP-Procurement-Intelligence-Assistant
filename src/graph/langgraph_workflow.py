@@ -1,6 +1,6 @@
 """
 src/graph/langgraph_workflow.py
-────────────────────────────────
+
 Builds and compiles the LangGraph procurement intelligence workflow.
 
 Graph structure:

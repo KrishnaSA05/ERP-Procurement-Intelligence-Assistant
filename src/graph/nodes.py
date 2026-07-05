@@ -1,6 +1,6 @@
 """
 src/graph/nodes.py
-───────────────────
+
 LangGraph node functions — one per processing step.
 
 Each node:

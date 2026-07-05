@@ -1,6 +1,6 @@
 """
 src/graph/state.py
-───────────────────
+
 Defines the shared state object that flows through every node
 in the LangGraph procurement workflow.
 
