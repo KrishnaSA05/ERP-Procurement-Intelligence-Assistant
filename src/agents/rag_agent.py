@@ -1,6 +1,6 @@
 """
 src/agents/rag_agent.py
-────────────────────────
+
 Agent 2b — RAG Agent.
 
 Retrieves relevant contract/policy chunks from ChromaDB and

@@ -1,6 +1,6 @@
 """
 src/agents/synthesis_agent.py
-───────────────────────────────
+
 Agent 3 — Synthesis Agent.
 
 Takes outputs from the SQL Agent and/or RAG Agent and merges them

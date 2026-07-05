@@ -1,6 +1,6 @@
 """
 src/agents/sql_agent.py
-────────────────────────
+
 Agent 2a — SQL Agent.
 
 Converts natural language procurement questions into SQL,
