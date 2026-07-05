@@ -1,6 +1,6 @@
 """
 api/models.py
-──────────────
+
 Pydantic models for FastAPI request validation and response serialisation.
 """
 

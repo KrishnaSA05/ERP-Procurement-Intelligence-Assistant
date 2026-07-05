@@ -1,6 +1,6 @@
 """
 api/main.py
-────────────
+
 FastAPI backend for the ERP Procurement Intelligence Assistant.
 
 Endpoints:
