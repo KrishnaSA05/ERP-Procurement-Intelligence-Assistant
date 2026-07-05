@@ -104,7 +104,7 @@ def classify_query(query: str) -> RouteDecision:
     """
     logger.info(f"Classifying query: '{query[:80]}...' " if len(query) > 80 else f"Classifying: '{query}'")
 
-    llm = get_llm(temperature=0.0, max_tokens=256)
+    llm = get_llm(temperature=0.0, max_tokens=256, label="classifier")
 
     messages = [
         SystemMessage(content=CLASSIFIER_SYSTEM_PROMPT),

@@ -38,6 +38,7 @@ from api.models import (
 )
 from src.graph.langgraph_workflow import build_workflow, run_query
 from src.data.db_loader           import check_connection
+from src.observability.tracer     import configure_tracing, get_trace, list_trace_ids
 from src.vectorstore.chroma_store import ChromaStore
 
 
@@ -58,6 +59,7 @@ app_state = AppState()
 async def lifespan(app: FastAPI):
     """Initialise heavy resources once at startup, clean up on shutdown."""
     logger.info("Starting up — building LangGraph workflow...")
+    configure_tracing()
     try:
         app_state.store    = ChromaStore()
         app_state.workflow = build_workflow(chroma_store=app_state.store)
@@ -148,15 +150,18 @@ async def query_endpoint(request: QueryRequest):
         ]
 
         response = QueryResponse(
-            question     = question,
-            final_answer = fr.final_answer,
-            route_used   = fr.route_used,
-            sql_query    = fr.sql_query or None,
-            citations    = citations,
-            data_rows    = fr.data_rows or [],
-            success      = fr.success,
-            error        = fr.error or None,
-            latency_ms   = latency_ms,
+            question           = question,
+            final_answer       = fr.final_answer,
+            route_used         = fr.route_used,
+            sql_query          = fr.sql_query or None,
+            citations          = citations,
+            data_rows          = fr.data_rows or [],
+            success            = fr.success,
+            error              = fr.error or None,
+            latency_ms         = latency_ms,
+            guardrail_blocked  = state.get("guardrail_blocked", False),
+            guardrail_category = state.get("guardrail_category") or None,
+            trace_id           = state.get("trace_id"),
         )
 
         # Store in history (keep last 50)
@@ -172,7 +177,13 @@ async def query_endpoint(request: QueryRequest):
         if len(app_state.history) > 50:
             app_state.history = app_state.history[-50:]
 
-        logger.success(f"  ✓ Response in {latency_ms}ms | route={fr.route_used.upper()}")
+        if response.guardrail_blocked:
+            logger.warning(
+                f"  🛡 Blocked by guardrail in {latency_ms}ms | "
+                f"category={response.guardrail_category}"
+            )
+        else:
+            logger.success(f"  ✓ Response in {latency_ms}ms | route={fr.route_used.upper()}")
         return response
 
     except HTTPException:
@@ -227,6 +238,32 @@ async def history_endpoint(limit: int = 20):
         items = [HistoryItem(**item) for item in items],
         total = len(app_state.history),
     )
+
+
+@app.get("/traces", include_in_schema=True)
+async def list_traces_endpoint(limit: int = 20):
+    """
+    Most recent trace_ids (newest first). Pair with GET /traces/{trace_id}
+    to see the full per-node timeline for any one of them — useful for
+    answering "why did this route to hybrid?" without grepping logs.
+    """
+    return {"trace_ids": list_trace_ids(limit=min(limit, 50))}
+
+
+@app.get("/traces/{trace_id}", include_in_schema=True)
+async def get_trace_endpoint(trace_id: str):
+    """
+    Full step-by-step timeline for one request: every node that ran,
+    how long it took, and the key decision it made (route chosen,
+    guardrail category, success/failure) — in execution order.
+    """
+    steps = get_trace(trace_id)
+    if not steps:
+        raise HTTPException(
+            status_code = 404,
+            detail      = f"No trace found for '{trace_id}' (may have expired from the in-memory buffer or never existed).",
+        )
+    return {"trace_id": trace_id, "steps": steps}
 
 
 @app.get("/sample-questions")

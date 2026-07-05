@@ -111,8 +111,8 @@ class SQLAgent:
     """
 
     def __init__(self):
-        self._llm_sql       = get_llm(temperature=0.0, max_tokens=512)
-        self._llm_narrative = get_llm(temperature=0.2, max_tokens=512)
+        self._llm_sql       = get_llm(temperature=0.0, max_tokens=512, label="sql_agent:generate")
+        self._llm_narrative = get_llm(temperature=0.2, max_tokens=512, label="sql_agent:narrate")
         self._engine        = get_engine()
         logger.info("SQLAgent initialised")
 

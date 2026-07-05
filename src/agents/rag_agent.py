@@ -193,7 +193,7 @@ class RAGAgent:
         n_final    : int = 5,     # final chunks passed to LLM after re-ranking
     ):
         self._store      = store or ChromaStore()
-        self._llm        = get_llm(temperature=0.1, max_tokens=1024)
+        self._llm        = get_llm(temperature=0.1, max_tokens=1024, label="rag_agent")
         self._n_retrieve = n_retrieve
         self._n_final    = n_final
         logger.info(f"RAGAgent initialised (retrieve={n_retrieve}, final={n_final})")

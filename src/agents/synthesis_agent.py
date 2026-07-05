@@ -118,7 +118,7 @@ class SynthesisAgent:
     """
 
     def __init__(self):
-        self._llm = get_llm(temperature=0.3, max_tokens=1024)
+        self._llm = get_llm(temperature=0.3, max_tokens=1024, label="synthesis_agent")
         logger.info("SynthesisAgent initialised")
 
     # ── SQL only ──────────────────────────────────────────────────────────────

@@ -12,6 +12,8 @@ Nodes are stateless functions — all shared objects (agents, stores)
 are injected at graph-build time via closures to keep nodes pure.
 
 Node map:
+  guardrail_node  → reads: question       writes: guardrail_blocked, guardrail_category,
+                    guardrail_reasoning, final_response (only if blocked)
   classify_node   → reads: question       writes: route, route_confidence, route_reasoning
   sql_node        → reads: question       writes: sql_result
   rag_node        → reads: question       writes: rag_result
@@ -22,14 +24,55 @@ Node map:
 from loguru import logger
 
 from src.graph.state            import ProcurementState
+from src.agents.guardrails      import check_guardrails
 from src.agents.query_classifier import route_query
 from src.agents.sql_agent       import SQLAgent
 from src.agents.rag_agent       import RAGAgent
 from src.agents.synthesis_agent import SynthesisAgent
+from src.observability.tracer   import traced_node
+
+
+# ── Node: guardrail ───────────────────────────────────────────────────────────
+
+@traced_node("guardrail")
+def guardrail_node(state: ProcurementState) -> dict:
+    """
+    Node 0 — Guardrail Gate.
+    Runs before the classifier. Blocks off-topic, jailbreak, and unsafe
+    requests before they reach the routing/agent pipeline.
+
+    If blocked, populates final_response directly so the graph can route
+    straight to END without touching the classifier or agents at all.
+    """
+    question = state["question"]
+    logger.info(f"[NODE: guardrail] '{question[:70]}'")
+
+    decision = check_guardrails(question, use_fast_path=True)
+
+    result = {
+        "guardrail_blocked"  : decision.blocked,
+        "guardrail_category" : decision.category.value,
+        "guardrail_reasoning": decision.reasoning,
+        "errors"             : state.get("errors", []),
+    }
+
+    if decision.blocked:
+        # Short-circuit: build the final_response here so downstream nodes
+        # (classify/sql/rag/synthesis) never run for a blocked request.
+        from src.agents.synthesis_agent import FinalResponse
+        result["final_response"] = FinalResponse(
+            question     = question,
+            final_answer = decision.refusal_message,
+            route_used   = "blocked",
+            success      = True,   # the guardrail did its job correctly
+        )
+
+    return result
 
 
 # ── Node: classify ────────────────────────────────────────────────────────────
 
+@traced_node("classify")
 def classify_node(state: ProcurementState) -> dict:
     """
     Node 1 — Query Classifier.
@@ -55,6 +98,7 @@ def make_sql_node(sql_agent: SQLAgent):
     Factory that returns a sql_node closure with the agent injected.
     Avoids re-initialising the agent on every graph invocation.
     """
+    @traced_node("sql")
     def sql_node(state: ProcurementState) -> dict:
         """
         Node 2a — SQL Agent.
@@ -87,6 +131,7 @@ def make_rag_node(rag_agent: RAGAgent):
     """
     Factory that returns a rag_node closure with the agent injected.
     """
+    @traced_node("rag")
     def rag_node(state: ProcurementState) -> dict:
         """
         Node 2b — RAG Agent.
@@ -119,6 +164,7 @@ def make_synthesis_node(synthesis_agent: SynthesisAgent):
     """
     Factory that returns a synthesis_node closure with the agent injected.
     """
+    @traced_node("synthesis")
     def synthesis_node(state: ProcurementState) -> dict:
         """
         Node 3 — Synthesis Agent.
@@ -158,6 +204,18 @@ def make_synthesis_node(synthesis_agent: SynthesisAgent):
 
 
 # ── Routing function (used in conditional edges) ──────────────────────────────
+
+def route_after_guardrail(state: ProcurementState) -> str:
+    """
+    Conditional edge function called after guardrail_node.
+    Blocked requests skip straight to END (final_response already set).
+    Clean requests continue to the classifier.
+    """
+    if state.get("guardrail_blocked", False):
+        logger.debug("  Guardrail blocked request — routing to END.")
+        return "end"
+    return "classify_node"
+
 
 def route_after_classify(state: ProcurementState) -> str:
     """

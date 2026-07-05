@@ -11,6 +11,10 @@ State fields progress through the graph:
   START
     │  question populated
     ▼
+  guardrail_node
+    │  guardrail_blocked, guardrail_category, guardrail_reasoning populated
+    │  (if blocked: final_response populated early, graph short-circuits to END)
+    ▼
   classify_node
     │  route, route_confidence, route_reasoning populated
     ▼
@@ -37,6 +41,12 @@ class ProcurementState(TypedDict, total=False):
 
     # ── Input ──────────────────────────────────────────────────────────────
     question : str          # the original user question (set at graph entry)
+    trace_id : str          # correlates this request's steps in observability/tracer.py
+
+    # ── Guardrails (runs before routing) ────────────────────────────────────
+    guardrail_blocked   : bool   # True if the request was blocked at the gate
+    guardrail_category  : str    # "clean" | "off_topic" | "jailbreak" | "unsafe"
+    guardrail_reasoning : str    # explanation of the guardrail decision
 
     # ── Routing ────────────────────────────────────────────────────────────
     route             : str     # "sql" | "rag" | "hybrid"

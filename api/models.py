@@ -34,13 +34,16 @@ class CitationModel(BaseModel):
 class QueryResponse(BaseModel):
     question     : str
     final_answer : str
-    route_used   : str                          # "sql" | "rag" | "hybrid"
+    route_used   : str                          # "sql" | "rag" | "hybrid" | "blocked"
     sql_query    : Optional[str]   = None       # shown for transparency
     citations    : list[CitationModel] = []
     data_rows    : list[dict]          = []
     success      : bool = True
     error        : Optional[str]  = None
     latency_ms   : Optional[float] = None       # response time
+    guardrail_blocked  : bool           = False  # True if the request was gated
+    guardrail_category : Optional[str]  = None   # "off_topic" | "jailbreak" | "unsafe"
+    trace_id           : Optional[str]  = None   # look up full step trace via GET /traces/{trace_id}
 
 
 class HealthResponse(BaseModel):
