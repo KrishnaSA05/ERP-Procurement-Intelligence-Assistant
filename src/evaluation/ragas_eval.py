@@ -235,7 +235,7 @@ def collect_eval_samples(
 def _judge_backend() -> str:
     """Return which backend will be used as RAGAS judge."""
     if os.getenv("GROQ_API_KEY"):
-        return "Groq llama-3.3-70b-versatile (free)"
+        return "Groq openai/gpt-oss-120b (free)"
     if os.getenv("OPENAI_API_KEY"):
         return "OpenAI gpt-3.5-turbo (~$0.05)"
     return "none configured"
@@ -256,11 +256,11 @@ def _get_ragas_judge_llm():
         from langchain_groq import ChatGroq
         # Use the larger 70b model for better judge quality
         llm = ChatGroq(
-            model       = os.getenv("GROQ_JUDGE_MODEL", "llama-3.3-70b-versatile"),
+            model       = os.getenv("GROQ_JUDGE_MODEL", "openai/gpt-oss-120b"),
             api_key     = groq_key,
             temperature = 0.0,
         )
-        logger.info("RAGAS judge LLM: Groq llama-3.3-70b-versatile (free)")
+        logger.info("RAGAS judge LLM: Groq openai/gpt-oss-120b (free)")
         return LangchainLLMWrapper(llm)
 
     if openai_key:
