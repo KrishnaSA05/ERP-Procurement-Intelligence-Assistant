@@ -1,6 +1,5 @@
 """
 src/agents/llm_gateway.py
-────────────────────────────
 LLM Gateway — wraps the raw LangChain LLM client with retry + fallback
 resilience.
 
