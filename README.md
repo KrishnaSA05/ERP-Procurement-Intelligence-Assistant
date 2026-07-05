@@ -26,14 +26,14 @@ User Query
 │                    LangGraph Orchestrator                        │
 │                                                                  │
 │  ┌──────────────────┐                                            │
-│  │  Guardrail Gate  │  ── fast-path rule engine (regex)         │
-│  │  (Agent 0)       │  ── LLM fallback for ambiguous queries    │
+│  │  Guardrail Gate  │  ── fast-path rule engine (regex)          │
+│  │  (Agent 0)       │  ── LLM fallback for ambiguous queries     │
 │  └────────┬─────────┘     blocks off-topic / jailbreak / unsafe  │
 │           │  clean → continue   |   blocked → refusal, END       │
 │           ▼                                                      │
 │  ┌──────────────────┐                                            │
-│  │  Query Classifier│  ── fast-path rule engine (regex)         │
-│  │  (Agent 1)       │  ── LLM fallback for ambiguous queries    │
+│  │  Query Classifier│  ── fast-path rule engine (regex)          │
+│  │  (Agent 1)       │  ── LLM fallback for ambiguous queries     │
 │  └────────┬─────────┘                                            │
 │           │  route: sql | rag | hybrid                           │
 │      ┌────┴────────┐                                             │
@@ -51,7 +51,7 @@ User Query
 │   invoices,     policy PDFs)                                     │
 │   spend)                                                         │
 │       │            │                                             │
-│       └─────┬──────┘                                            │
+│       └─────┬──────┘                                             │
 │             ▼                                                    │
 │  ┌──────────────────┐                                            │
 │  │ Synthesis Agent  │  merges SQL narrative + RAG citations      │
