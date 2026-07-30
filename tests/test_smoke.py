@@ -287,6 +287,141 @@ class TestObservability:
         assert steps[0]["guardrail_blocked"] is True
 
 
+class TestVisionAgent:
+    """
+    Vision Agent tests — mocked VLM client only, no live Groq/Bedrock
+    calls, same spirit as TestLLMGateway's mocked clients above.
+    """
+
+    def test_parse_json_response_strips_fences(self):
+        try:
+            from src.agents.vision_agent import _parse_json_response
+        except ImportError:
+            pytest.skip("vision_agent not importable")
+
+        raw = '```json\n{"vendor_name": "Alpha Tech", "total_amount": 100}\n```'
+        parsed = _parse_json_response(raw)
+        assert parsed["vendor_name"] == "Alpha Tech"
+        assert parsed["total_amount"] == 100
+
+    def test_parse_json_response_raises_on_no_json(self):
+        try:
+            from src.agents.vision_agent import _parse_json_response
+        except ImportError:
+            pytest.skip("vision_agent not importable")
+
+        with pytest.raises(ValueError):
+            _parse_json_response("Sorry, I can't read this image.")
+
+    def test_run_success_populates_fields(self, monkeypatch):
+        try:
+            from src.agents.vision_agent import VisionAgent
+        except ImportError:
+            pytest.skip("vision_agent not importable")
+
+        fake_response = (
+            '{"document_type": "invoice", "vendor_name": "Alpha Tech", '
+            '"po_number": "PO-4471", "invoice_number": "INV-9001", '
+            '"invoice_date": "2024-03-01", "total_amount": 12400.0, '
+            '"line_items": [{"description": "Consulting", "quantity": 1, '
+            '"unit_price": 12400.0, "total": 12400.0}]}'
+        )
+        monkeypatch.setattr(
+            "src.agents.vision_agent.describe_image",
+            lambda image_bytes, prompt, label="": fake_response,
+        )
+
+        agent  = VisionAgent()
+        result = agent.run(b"fake-image-bytes")
+
+        assert result.success is True
+        assert result.vendor_name == "Alpha Tech"
+        assert result.po_number == "PO-4471"
+        assert result.total_amount == 12400.0
+        assert len(result.line_items) == 1
+        assert "vendor=Alpha Tech" in result.as_context_snippet()
+
+    def test_context_snippet_surfaces_parsed_po_and_invoice_ids(self):
+        """
+        Regression test — real bug found in manual testing: the ERP schema's
+        po_id/invoice_id columns are plain integers with no "PO-"/"INV-"
+        prefix, but the Vision Agent extracts formatted references like
+        "PO-00096". Without an explicit parsed id in the context snippet,
+        the SQL agent's text-to-SQL step sometimes failed to bridge the two
+        formats and returned prose instead of SQL, tripping the "only
+        SELECT" safety guard. The snippet must surface a bare po_id/
+        invoice_id so the SQL agent doesn't have to parse the prefix itself.
+        """
+        try:
+            from src.agents.vision_agent import VisionAgentResult, _parse_reference_id
+        except ImportError:
+            pytest.skip("vision_agent not importable")
+
+        assert _parse_reference_id("PO-00096") == 96
+        assert _parse_reference_id("INV-00092") == 92
+        assert _parse_reference_id("") is None
+        assert _parse_reference_id(None) is None
+
+        result = VisionAgentResult(
+            success=True, vendor_name="LewisConsulting",
+            po_number="PO-00096", invoice_number="INV-00092",
+        )
+        snippet = result.as_context_snippet()
+        assert "po_id=96" in snippet
+        assert "invoice_id=92" in snippet
+
+    def test_run_failure_degrades_gracefully(self, monkeypatch):
+        try:
+            from src.agents.vision_agent import VisionAgent
+        except ImportError:
+            pytest.skip("vision_agent not importable")
+
+        def _boom(image_bytes, prompt, label=""):
+            raise RuntimeError("VLM unreachable")
+
+        monkeypatch.setattr("src.agents.vision_agent.describe_image", _boom)
+
+        agent  = VisionAgent()
+        result = agent.run(b"fake-image-bytes")
+
+        assert result.success is False
+        assert "VLM unreachable" in result.error
+        assert "failed" in result.as_context_snippet().lower()
+
+    def test_vision_node_is_noop_without_image(self):
+        try:
+            from src.graph.nodes import make_vision_node
+            from src.agents.vision_agent import VisionAgent
+        except ImportError:
+            pytest.skip("graph nodes not importable")
+
+        node = make_vision_node(VisionAgent())
+        result = node({"question": "What is our total spend?", "errors": []})
+        assert result == {}
+
+    def test_vision_node_enriches_question_with_image(self, monkeypatch):
+        try:
+            from src.graph.nodes import make_vision_node
+            from src.agents.vision_agent import VisionAgent, VisionAgentResult
+        except ImportError:
+            pytest.skip("graph nodes not importable")
+
+        class _FakeVisionAgent(VisionAgent):
+            def run(self, image_bytes, question=""):
+                return VisionAgentResult(success=True, vendor_name="Alpha Tech", po_number="PO-4471")
+
+        node = make_vision_node(_FakeVisionAgent())
+        result = node({
+            "question": "Does this match our records?",
+            "errors": [],
+            "image_data": b"fake-bytes",
+        })
+
+        assert result["vision_result"].vendor_name == "Alpha Tech"
+        assert "Alpha Tech" in result["question"]
+        assert "Does this match our records?" in result["question"]
+
+
 class TestAPIHealth:
     @pytest.mark.asyncio
     async def test_health_endpoint(self, api_client):
