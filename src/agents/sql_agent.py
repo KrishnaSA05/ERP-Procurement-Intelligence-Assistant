@@ -85,6 +85,15 @@ RULES:
 9. For spending/summary questions, use simple aggregation on vendors + purchase_orders only.
    Do NOT join spend_analysis with purchase_orders — use spend_analysis standalone for trend data.
    Do NOT add quarter/date filters unless the question explicitly asks for a time period.
+10. PO/invoice references may appear formatted as "PO-00096" or "INV-00092" (e.g. when the
+    question comes from a scanned/photographed document via the Vision Agent). These map
+    directly to the plain integer po_id / invoice_id columns — strip the "PO-"/"INV-" prefix
+    and any leading zeros before comparing. "PO-00096" → po_id = 96. "INV-00092" → invoice_id = 92.
+    If the question already gives you a parsed numeric id (e.g. "po_id=96"), use that directly.
+11. Vendor names may come from OCR/VLM transcription of a physical document and can have minor
+    formatting differences from the stored value (missing spaces, case differences, punctuation).
+    When matching a vendor name from such a source, prefer ILIKE with wildcards over exact
+    equality, e.g. WHERE v.name ILIKE '%Lewis%Consulting%' rather than v.name = 'LewisConsulting'.
 
 Today's date: {date.today().isoformat()}"""
 
