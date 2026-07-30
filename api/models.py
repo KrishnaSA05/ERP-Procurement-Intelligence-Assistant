@@ -19,6 +19,15 @@ class QueryRequest(BaseModel):
         description = "Natural language procurement question",
         examples   = ["Which vendors have open POs above $50,000?"],
     )
+    image_base64 : Optional[str] = Field(
+        default = None,
+        description = (
+            "Optional base64-encoded photo/scan of an invoice or purchase "
+            "order. When provided, the Vision Agent extracts vendor, PO "
+            "number, line items, and total before the question is routed — "
+            "e.g. pair with a question like 'does this match our records?'"
+        ),
+    )
 
 
 # ── Sub-models ────────────────────────────────────────────────────────────────
@@ -29,6 +38,18 @@ class CitationModel(BaseModel):
     page_number : int
     similarity  : float
     excerpt     : str
+
+
+class VisionExtractionModel(BaseModel):
+    success        : bool
+    error          : Optional[str] = None
+    document_type  : str
+    vendor_name    : str
+    po_number      : str
+    invoice_number : str
+    invoice_date   : str
+    total_amount   : Optional[float] = None
+    line_items     : list[dict] = []
 
 
 class QueryResponse(BaseModel):
@@ -44,6 +65,7 @@ class QueryResponse(BaseModel):
     guardrail_blocked  : bool           = False  # True if the request was gated
     guardrail_category : Optional[str]  = None   # "off_topic" | "jailbreak" | "unsafe"
     trace_id           : Optional[str]  = None   # look up full step trace via GET /traces/{trace_id}
+    vision_extracted   : Optional[VisionExtractionModel] = None  # set only if an image was attached
 
 
 class HealthResponse(BaseModel):

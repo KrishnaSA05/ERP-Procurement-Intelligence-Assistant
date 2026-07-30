@@ -17,6 +17,7 @@ Then open: http://localhost:8000/docs
 
 import sys
 import time
+import base64
 from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -33,7 +34,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from api.models import (
-    QueryRequest, QueryResponse, CitationModel,
+    QueryRequest, QueryResponse, CitationModel, VisionExtractionModel,
     HealthResponse, HistoryItem, HistoryResponse,
 )
 from src.graph.langgraph_workflow import build_workflow, run_query
@@ -126,11 +127,18 @@ async def query_endpoint(request: QueryRequest):
     question = request.question.strip()
     t_start  = time.time()
 
-    logger.info(f"POST /query — '{question[:80]}'")
+    image_bytes = None
+    if request.image_base64:
+        try:
+            image_bytes = base64.b64decode(request.image_base64)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid image_base64: {e}")
+
+    logger.info(f"POST /query — '{question[:80]}'" + (" [+image]" if image_bytes else ""))
 
     try:
         # Run through LangGraph
-        state      = run_query(app_state.workflow, question)
+        state      = run_query(app_state.workflow, question, image_data=image_bytes)
         latency_ms = round((time.time() - t_start) * 1000, 1)
 
         fr = state.get("final_response")
@@ -149,6 +157,9 @@ async def query_endpoint(request: QueryRequest):
             for c in (fr.citations or [])
         ]
 
+        vr = state.get("vision_result")
+        vision_extracted = VisionExtractionModel(**vr.to_dict()) if vr is not None else None
+
         response = QueryResponse(
             question           = question,
             final_answer       = fr.final_answer,
@@ -162,6 +173,7 @@ async def query_endpoint(request: QueryRequest):
             guardrail_blocked  = state.get("guardrail_blocked", False),
             guardrail_category = state.get("guardrail_category") or None,
             trace_id           = state.get("trace_id"),
+            vision_extracted   = vision_extracted,
         )
 
         # Store in history (keep last 50)

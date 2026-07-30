@@ -19,6 +19,7 @@ Run:
 
 import sys
 import time
+import base64
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,12 +87,17 @@ if "total_latency" not in st.session_state: st.session_state.total_latency = 0.0
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def call_api(question: str) -> dict | None:
-    """POST /query to FastAPI backend."""
+def call_api(question: str, image_bytes: bytes = None) -> dict | None:
+    """POST /query to FastAPI backend. Attaches a base64 image if provided
+    (an invoice/PO photo — see VisionAgent)."""
     try:
+        payload = {"question": question}
+        if image_bytes:
+            payload["image_base64"] = base64.b64encode(image_bytes).decode("utf-8")
+
         resp = requests.post(
             f"{API_URL}/query",
-            json    = {"question": question},
+            json    = payload,
             timeout = 120,
         )
         resp.raise_for_status()
@@ -155,6 +161,27 @@ def _render_answer(data: dict):
         f'<div class="answer-card">{data.get("final_answer", "")}</div>',
         unsafe_allow_html=True,
     )
+
+    # Vision extraction (only present if an image was attached)
+    vision = data.get("vision_extracted")
+    if vision:
+        with st.expander("🧾 Extracted from uploaded image", expanded=not vision.get("success", True) is False):
+            if not vision.get("success"):
+                st.warning(f"Vision extraction failed: {vision.get('error', 'unknown error')}")
+            else:
+                vcol1, vcol2 = st.columns(2)
+                with vcol1:
+                    st.text(f"Document type : {vision.get('document_type', '')}")
+                    st.text(f"Vendor        : {vision.get('vendor_name', '')}")
+                    st.text(f"PO number     : {vision.get('po_number', '')}")
+                with vcol2:
+                    st.text(f"Invoice #     : {vision.get('invoice_number', '')}")
+                    st.text(f"Date          : {vision.get('invoice_date', '')}")
+                    st.text(f"Total         : {vision.get('total_amount', '')}")
+                line_items = vision.get("line_items") or []
+                if line_items:
+                    import pandas as pd
+                    st.dataframe(pd.DataFrame(line_items), use_container_width=True, hide_index=True)
 
     # SQL transparency
     sql = data.get("sql_query")
@@ -302,6 +329,16 @@ for msg in st.session_state.messages:
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 
+# Optional invoice/PO photo — extracted by the Vision Agent and folded into
+# the question before routing (e.g. "does this match our records?").
+uploaded_image = st.file_uploader(
+    "📎 Attach an invoice/PO photo (optional)",
+    type = ["png", "jpg", "jpeg"],
+    key  = "invoice_uploader",
+)
+if uploaded_image is not None:
+    st.image(uploaded_image, caption="Attached — will be sent with your next question", width=200)
+
 # Pre-fill from sidebar sample click
 prefill = st.session_state.pop("prefill_question", "")
 
@@ -312,17 +349,20 @@ question = st.chat_input(
 
 if question:
     question = question.strip()
+    image_bytes = uploaded_image.getvalue() if uploaded_image is not None else None
 
     # Show user message
     with st.chat_message("user"):
         st.markdown(question)
+        if image_bytes:
+            st.image(image_bytes, width=160)
     st.session_state.messages.append({"role": "user", "content": question})
 
     # Call API
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             t0      = time.time()
-            data    = call_api(question)
+            data    = call_api(question, image_bytes=image_bytes)
             elapsed = round((time.time() - t0) * 1000)
 
         if data:
