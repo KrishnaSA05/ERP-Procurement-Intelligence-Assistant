@@ -120,12 +120,56 @@ class SQLAgent:
     """
 
     def __init__(self):
-        self._llm_sql       = get_llm(temperature=0.0, max_tokens=512, label="sql_agent:generate")
-        self._llm_narrative = get_llm(temperature=0.2, max_tokens=512, label="sql_agent:narrate")
+        # NOTE: max_tokens is generous here on purpose. The dev-env model
+        # (openai/gpt-oss-20b via Groq) is a REASONING model — it spends
+        # tokens on internal "thinking" (often wrapped in <think>...</think>)
+        # before writing the actual answer, and that thinking counts against
+        # max_tokens. A tight budget was fine for simple single-row lookups,
+        # but a query needing a JOIN + GROUP BY + date-math (e.g. "overdue
+        # invoices by category") can burn the whole budget on reasoning alone,
+        # truncating the response before any SQL is ever written — which then
+        # (correctly, but unhelpfully) trips the "must start with SELECT"
+        # safety check. Same risk applies in prod on any non-reasoning model,
+        # just with more headroom to spare.
+        self._llm_sql       = get_llm(temperature=0.0, max_tokens=1536, label="sql_agent:generate")
+        self._llm_narrative = get_llm(temperature=0.2, max_tokens=768,  label="sql_agent:narrate")
         self._engine        = get_engine()
         logger.info("SQLAgent initialised")
 
     # ── Step 1: Generate SQL ──────────────────────────────────────────────────
+
+    def _clean_sql_response(self, raw: str) -> str:
+        """
+        Cleans a raw LLM response down to just the SQL statement.
+
+        The system prompt tells the model to return ONLY raw SQL, but LLMs
+        (especially smaller/faster models like Groq's) sometimes prepend a
+        line of commentary anyway (e.g. "Here's the query:\n\nSELECT ...").
+        Previously this cleanup (fence stripping + extracting the actual
+        SELECT/WITH block) only existed in the retry path — a first-attempt
+        response with any leading prose would immediately fail the "starts
+        with SELECT" safety check and get rejected as BLOCKED, even though
+        a perfectly valid SELECT was present a few characters later. Now
+        both the first attempt and the retry share this same cleanup.
+
+        Also strips a <think>...</think> block if present — reasoning
+        models (e.g. openai/gpt-oss-20b, used in dev via Groq) sometimes
+        surface their internal chain-of-thought inline in the content field
+        rather than in a separate field. Left alone, that reasoning text
+        can itself confuse the SELECT/WITH extraction below (or, if the
+        closing tag is missing because max_tokens was hit mid-thought,
+        leave no SQL at all to find).
+        """
+        cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.IGNORECASE | re.DOTALL).strip()
+        cleaned = re.sub(r"```sql|```", "", cleaned).strip()
+
+        # Pull out the SELECT/WITH statement itself, dropping any prose
+        # before (or after) it.
+        match = re.search(r"((?:WITH|SELECT)\b.*)", cleaned, re.IGNORECASE | re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
+
+        return cleaned.rstrip(";").strip()
 
     def _generate_sql(self, question: str) -> str:
         """Convert natural language question to a SQL SELECT statement."""
@@ -134,12 +178,7 @@ class SQLAgent:
             HumanMessage(content=f"Question: {question}\n\nSQL query:"),
         ]
         response = self._llm_sql.invoke(messages)
-        sql = response.content.strip()
-
-        # Strip markdown code fences if present
-        sql = re.sub(r"```sql|```", "", sql).strip()
-        # Remove trailing semicolons
-        sql = sql.rstrip(";").strip()
+        sql = self._clean_sql_response(response.content.strip())
 
         logger.debug(f"  Generated SQL:\n{sql}")
         return sql
@@ -155,6 +194,15 @@ class SQLAgent:
         # Safety check — only allow SELECT
         sql_upper = sql.upper().strip()
         if not sql_upper.startswith("SELECT") and not sql_upper.startswith("WITH"):
+            if not sql_upper:
+                # No SQL at all in the response — most likely a reasoning
+                # model that spent its whole max_tokens budget "thinking"
+                # and never got to write the query (see _clean_sql_response).
+                return [], (
+                    "BLOCKED: The model returned no SQL for this question "
+                    "(response was empty after removing reasoning/commentary — "
+                    "likely ran out of output tokens before writing the query)."
+                )
             return [], "BLOCKED: Only SELECT queries are permitted."
 
         try:
@@ -254,24 +302,18 @@ class SQLAgent:
                 )),
             ]
             try:
-                fixed = self._llm_sql.invoke(retry_messages).content.strip()
-                # Strip markdown fences
-                fixed = re.sub(r"```sql|```", "", fixed).strip()
-                # FIX: extract only the SELECT/WITH block — drop any prose the
-                # LLM appended after the query (e.g. "The error indicates...")
-                match = re.search(
-                    r"((?:WITH|SELECT)\b.*)",
-                    fixed,
-                    re.IGNORECASE | re.DOTALL,
-                )
-                if match:
-                    fixed = match.group(1).strip()
-                fixed = fixed.rstrip(";").strip()
+                raw_retry = self._llm_sql.invoke(retry_messages).content.strip()
+                fixed     = self._clean_sql_response(raw_retry)
                 logger.debug(f"  Retry SQL:\n{fixed}")
                 data, error = self._execute_sql(fixed)
                 sql = fixed
             except Exception as retry_e:
                 logger.error(f"  Retry failed: {retry_e}")
+                # FIX: previously this left `error` at its stale first-attempt
+                # value (e.g. "BLOCKED: Only SELECT queries are permitted"),
+                # which was misleading when the real failure was the retry
+                # call itself throwing (network/LLM error), not a bad query.
+                error = f"{error} (retry also failed: {retry_e})"
 
         if error:
             return SQLAgentResult(
