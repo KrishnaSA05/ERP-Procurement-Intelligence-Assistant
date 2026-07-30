@@ -2,8 +2,6 @@
 
 > **Agentic multimodal RAG system** that answers cross-source procurement questions — text or photo — by routing between a **SQL agent** (structured ERP data), a **RAG agent** (vendor contracts + policy documents), and a **Vision agent** (invoice/PO photos), synthesising results into a single cited business response — hardened with input guardrails, LLM gateway resilience (retry + fallback), and native request tracing.
 
-Built as an AI/ML portfolio project targeting enterprise consulting roles (Capgemini, Infosys, Accenture, Deloitte).
-
 **What this demonstrates:**
 - **Agentic orchestration** — LangGraph state machine with conditional routing across 6 agents, not a single prompt-and-pray chain
 - **Multimodal AI** — a Vision (VLM) agent that reads a photographed invoice and cross-checks it against live ERP data, with a real dual-backend (Groq / Bedrock) production strategy
