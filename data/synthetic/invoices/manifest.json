@@ -1,0 +1,253 @@
+[
+  {
+    "file": "data\\synthetic\\invoices\\matching\\invoice_INV-00007.jpg",
+    "category": "matching",
+    "expected_match": true,
+    "ground_truth": {
+      "vendor_name": "Smith Technologies",
+      "po_number": "PO-00010",
+      "invoice_number": "INV-00007",
+      "invoice_date": "2026-03-16",
+      "total_amount": 34564.5,
+      "line_items": [
+        {
+          "description": "Harness b2c interfaces",
+          "quantity": 1,
+          "unit_price": 34564.5,
+          "total": 34564.5
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\matching\\invoice_INV-00348.jpg",
+    "category": "matching",
+    "expected_match": true,
+    "ground_truth": {
+      "vendor_name": "Hughes Technologies",
+      "po_number": "PO-00362",
+      "invoice_number": "INV-00348",
+      "invoice_date": "2024-07-16",
+      "total_amount": 138916.99,
+      "line_items": [
+        {
+          "description": "Visualize scalable partnerships",
+          "quantity": 1,
+          "unit_price": 138916.99,
+          "total": 138916.99
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\matching\\invoice_INV-00393.jpg",
+    "category": "matching",
+    "expected_match": true,
+    "ground_truth": {
+      "vendor_name": "Cervantes Solutions",
+      "po_number": "PO-00403",
+      "invoice_number": "INV-00393",
+      "invoice_date": "2023-11-24",
+      "total_amount": 319994.48,
+      "line_items": [
+        {
+          "description": "Transition mission-critical relationships",
+          "quantity": 1,
+          "unit_price": 239995.86,
+          "total": 239995.86
+        },
+        {
+          "description": "Benchmark leading-edge mindshare",
+          "quantity": 1,
+          "unit_price": 79998.62,
+          "total": 79998.62
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\matching\\invoice_INV-00314.jpg",
+    "category": "matching",
+    "expected_match": true,
+    "ground_truth": {
+      "vendor_name": "Morgan Systems",
+      "po_number": "PO-00323",
+      "invoice_number": "INV-00314",
+      "invoice_date": "2024-07-07",
+      "total_amount": 9238.23,
+      "line_items": [
+        {
+          "description": "Architect robust infrastructures",
+          "quantity": 1,
+          "unit_price": 831.44,
+          "total": 831.44
+        },
+        {
+          "description": "Brand next-generation partnerships",
+          "quantity": 5,
+          "unit_price": 406.48,
+          "total": 2032.41
+        },
+        {
+          "description": "Incentivize e-business schemas",
+          "quantity": 1,
+          "unit_price": 6374.38,
+          "total": 6374.38
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\matching\\invoice_INV-00376.jpg",
+    "category": "matching",
+    "expected_match": true,
+    "ground_truth": {
+      "vendor_name": "Jenkins Global",
+      "po_number": "PO-00391",
+      "invoice_number": "INV-00376",
+      "invoice_date": "2023-06-09",
+      "total_amount": 460510.18,
+      "line_items": [
+        {
+          "description": "Brand leading-edge networks",
+          "quantity": 1,
+          "unit_price": 460510.18,
+          "total": 460510.18
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\mismatched\\invoice_INV-18108.jpg",
+    "category": "mismatched",
+    "expected_match": false,
+    "note": "Printed total ($24,706.61) intentionally differs from the 'true' amount ($29,066.60) it was derived from.",
+    "ground_truth": {
+      "vendor_name": "Meza Ltd",
+      "po_number": "PO-86414",
+      "invoice_number": "INV-18108",
+      "invoice_date": "2026-06-30",
+      "total_amount": 24706.61,
+      "line_items": [
+        {
+          "description": "Benchmark leading-edge networks",
+          "quantity": 1,
+          "unit_price": 24706.61,
+          "total": 24706.61
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\mismatched\\invoice_INV-82963.jpg",
+    "category": "mismatched",
+    "expected_match": false,
+    "note": "Printed total ($36,545.06) intentionally differs from the 'true' amount ($42,994.19) it was derived from.",
+    "ground_truth": {
+      "vendor_name": "Sanders, Cherry and Williams",
+      "po_number": "PO-16105",
+      "invoice_number": "INV-82963",
+      "invoice_date": "2026-07-23",
+      "total_amount": 36545.06,
+      "line_items": [
+        {
+          "description": "Enable distributed e-markets",
+          "quantity": 1,
+          "unit_price": 6943.56,
+          "total": 6943.56
+        },
+        {
+          "description": "Orchestrate 24/7 networks",
+          "quantity": 2,
+          "unit_price": 9318.99,
+          "total": 18637.98
+        },
+        {
+          "description": "Monetize viral platforms",
+          "quantity": 1,
+          "unit_price": 10963.52,
+          "total": 10963.52
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\mismatched\\invoice_INV-93743.jpg",
+    "category": "mismatched",
+    "expected_match": false,
+    "note": "Printed total ($11,269.56) intentionally differs from the 'true' amount ($9,799.62) it was derived from.",
+    "ground_truth": {
+      "vendor_name": "Duncan, Lopez and Davis",
+      "po_number": "PO-84868",
+      "invoice_number": "INV-93743",
+      "invoice_date": "2026-07-09",
+      "total_amount": 11269.56,
+      "line_items": [
+        {
+          "description": "Optimize leading-edge e-business",
+          "quantity": 1,
+          "unit_price": 11269.56,
+          "total": 11269.56
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\no_match\\invoice_INV-98133.jpg",
+    "category": "no_match",
+    "expected_match": null,
+    "ground_truth": {
+      "vendor_name": "Crawford PLC (Not In ERP)",
+      "po_number": "PO-93374",
+      "invoice_number": "INV-98133",
+      "invoice_date": "2026-07-20",
+      "total_amount": 13767.8,
+      "line_items": [
+        {
+          "description": "Revolutionize turn-key bandwidth",
+          "quantity": 5,
+          "unit_price": 1128.96,
+          "total": 5644.8
+        },
+        {
+          "description": "Benchmark ubiquitous relationships",
+          "quantity": 2,
+          "unit_price": 1307.94,
+          "total": 2615.88
+        },
+        {
+          "description": "Monetize interactive roi",
+          "quantity": 2,
+          "unit_price": 2753.56,
+          "total": 5507.12
+        }
+      ]
+    }
+  },
+  {
+    "file": "data\\synthetic\\invoices\\no_match\\invoice_INV-93999.jpg",
+    "category": "no_match",
+    "expected_match": null,
+    "ground_truth": {
+      "vendor_name": "Chan, Miller and Evans (Not In ERP)",
+      "po_number": "PO-92945",
+      "invoice_number": "INV-93999",
+      "invoice_date": "2026-07-24",
+      "total_amount": 2096.17,
+      "line_items": [
+        {
+          "description": "Matrix cross-platform systems",
+          "quantity": 5,
+          "unit_price": 285.08,
+          "total": 1425.4
+        },
+        {
+          "description": "Envisioneer intuitive initiatives",
+          "quantity": 2,
+          "unit_price": 335.38,
+          "total": 670.77
+        }
+      ]
+    }
+  }
+]
