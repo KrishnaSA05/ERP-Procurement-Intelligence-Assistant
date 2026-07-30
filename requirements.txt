@@ -16,6 +16,15 @@ pypdf==4.3.1
 pdfplumber==0.11.4
 unstructured==0.15.0
 
+# ── Vision / VLM ──────────────────────────────────────────────────────────────
+# pymupdf rasterizes scanned PDF pages to images for the VLM-OCR ingestion
+# rescue (src/ingestion/vlm_ocr.py). No new LLM SDK needed for the vision
+# client itself (src/agents/vlm_client.py) — dev reuses langchain-groq
+# (already above) against Groq's vision-capable model, and prod reuses
+# langchain-aws (already above) since Bedrock Claude is natively multimodal.
+pymupdf==1.24.9
+Pillow==10.4.0                   # renders synthetic invoice/PO test images (data/synthetic/generate_invoice_images.py)
+
 # ── Embeddings ────────────────────────────────────────────────────────────────
 sentence-transformers==3.0.1
 boto3==1.34.160                  # for Bedrock + S3 + Lambda
