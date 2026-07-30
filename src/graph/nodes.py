@@ -12,6 +12,8 @@ Nodes are stateless functions — all shared objects (agents, stores)
 are injected at graph-build time via closures to keep nodes pure.
 
 Node map:
+  vision_node     → reads: image_data     writes: vision_result, question (enriched)
+                    no-op when image_data is absent
   guardrail_node  → reads: question       writes: guardrail_blocked, guardrail_category,
                     guardrail_reasoning, final_response (only if blocked)
   classify_node   → reads: question       writes: route, route_confidence, route_reasoning
@@ -29,7 +31,56 @@ from src.agents.query_classifier import route_query
 from src.agents.sql_agent       import SQLAgent
 from src.agents.rag_agent       import RAGAgent
 from src.agents.synthesis_agent import SynthesisAgent
+from src.agents.vision_agent    import VisionAgent
 from src.observability.tracer   import traced_node
+
+
+# ── Node factory: vision (runs before guardrail) ──────────────────────────────
+
+def make_vision_node(vision_agent: VisionAgent):
+    """
+    Factory that returns a vision_node closure with the agent injected.
+    """
+    @traced_node("vision")
+    def vision_node(state: ProcurementState) -> dict:
+        """
+        Node -1 — Vision Agent (pre-guardrail).
+        Runs only when an image was attached to the request (image_data set).
+        Extracts structured fields from the image and folds a compact summary
+        into `question`, so every downstream node (guardrail, classify, sql,
+        rag, synthesis) sees one enriched question and needs zero changes.
+
+        When no image is attached this is a fast no-op — it returns an empty
+        dict and doesn't touch state at all.
+        """
+        image_data = state.get("image_data")
+        if not image_data:
+            return {}
+
+        question = state.get("question", "")
+        logger.info(f"[NODE: vision] image attached ({len(image_data)} bytes)")
+
+        errors = list(state.get("errors", []))
+
+        try:
+            vision_result = vision_agent.run(image_data, question=question)
+            if not vision_result.success:
+                errors.append(f"Vision agent error: {vision_result.error}")
+            enriched_question = f"{question}\n\n{vision_result.as_context_snippet()}".strip()
+        except Exception as e:
+            logger.error(f"  Vision node exception: {e}")
+            from src.agents.vision_agent import VisionAgentResult
+            vision_result = VisionAgentResult(success=False, error=str(e))
+            enriched_question = question
+            errors.append(f"Vision node exception: {e}")
+
+        return {
+            "vision_result": vision_result,
+            "question"     : enriched_question,
+            "errors"       : errors,
+        }
+
+    return vision_node
 
 
 # ── Node: guardrail ───────────────────────────────────────────────────────────
@@ -233,6 +284,18 @@ def route_after_classify(state: ProcurementState) -> str:
         return "rag_node"
     else:
         return "sql_node"    # hybrid: go to SQL first, then RAG
+
+
+def route_after_vision(state: ProcurementState) -> str:
+    """
+    Conditional edge function called after vision_node.
+    Vision extraction (or its absence) never blocks a request on its own —
+    it only enriches `question` — so this always continues to the guardrail
+    gate. Kept as an explicit conditional (rather than a plain edge) so a
+    future policy (e.g. "block on VLM-detected unsafe image content") has
+    an obvious place to plug in without restructuring the graph.
+    """
+    return "guardrail_node"
 
 
 def route_after_sql(state: ProcurementState) -> str:

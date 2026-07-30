@@ -9,7 +9,11 @@ what it needs and writes its output back into the state.
 
 State fields progress through the graph:
   START
-    │  question populated
+    │  question populated (image_data optionally attached)
+    ▼
+  vision_node
+    │  no-op unless image_data is set; if set: vision_result populated
+    │  and its extracted fields are folded into `question` as context
     ▼
   guardrail_node
     │  guardrail_blocked, guardrail_category, guardrail_reasoning populated
@@ -42,6 +46,10 @@ class ProcurementState(TypedDict, total=False):
     # ── Input ──────────────────────────────────────────────────────────────
     question : str          # the original user question (set at graph entry)
     trace_id : str          # correlates this request's steps in observability/tracer.py
+
+    # ── Vision (optional — only set if an image was attached) ───────────────
+    image_data    : Optional[bytes]   # raw invoice/PO image bytes, if uploaded
+    vision_result : Optional[Any]     # VisionAgentResult (from vision_agent.py)
 
     # ── Guardrails (runs before routing) ────────────────────────────────────
     guardrail_blocked   : bool   # True if the request was blocked at the gate

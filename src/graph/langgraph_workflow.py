@@ -4,8 +4,12 @@ src/graph/langgraph_workflow.py
 Builds and compiles the LangGraph procurement intelligence workflow.
 
 Graph structure:
+                        ┌──────────────┐
+                START ──► vision_node  │  no-op unless an image is attached
+                        └──────┬───────┘
+                               ▼
                         ┌────────────────┐
-                START ──► guardrail_node │
+                        │ guardrail_node │
                         └───────┬────────┘
                                 │
                      blocked │     │ clean
@@ -25,10 +29,17 @@ Graph structure:
                                  │
                                 END
 
-Note: guardrail_node runs FIRST. If it blocks a request (off-topic,
-jailbreak, unsafe), the graph short-circuits straight to END with a
-refusal already populated in final_response — the classifier and every
-downstream agent are skipped entirely.
+Note: vision_node runs FIRST, before the guardrail gate. If an image was
+attached (state["image_data"]), it extracts structured fields (vendor, PO
+number, line items, total) via a VLM and folds a compact summary into
+`question` — so guardrails/classifier/SQL/RAG/synthesis all see one
+enriched question and need no changes at all. If no image is attached,
+vision_node is a fast no-op.
+
+guardrail_node runs next. If it blocks a request (off-topic, jailbreak,
+unsafe), the graph short-circuits straight to END with a refusal already
+populated in final_response — the classifier and every downstream agent
+are skipped entirely.
 
 Usage:
     from src.graph.langgraph_workflow import build_workflow, run_query
@@ -50,9 +61,11 @@ from src.graph.state  import ProcurementState
 from src.graph.nodes  import (
     guardrail_node,
     classify_node,
+    make_vision_node,
     make_sql_node,
     make_rag_node,
     make_synthesis_node,
+    route_after_vision,
     route_after_guardrail,
     route_after_classify,
     route_after_sql,
@@ -61,6 +74,7 @@ from src.observability.tracer import new_trace_id
 from src.agents.sql_agent       import SQLAgent
 from src.agents.rag_agent       import RAGAgent
 from src.agents.synthesis_agent import SynthesisAgent
+from src.agents.vision_agent    import VisionAgent
 from src.vectorstore.chroma_store import ChromaStore
 
 
@@ -70,6 +84,7 @@ def build_workflow(
     sql_agent       : SQLAgent       = None,
     rag_agent       : RAGAgent       = None,
     synthesis_agent : SynthesisAgent = None,
+    vision_agent    : VisionAgent    = None,
     chroma_store    : ChromaStore    = None,
 ):
     """
@@ -82,6 +97,7 @@ def build_workflow(
         sql_agent       : Pre-built SQLAgent (or None to auto-init)
         rag_agent       : Pre-built RAGAgent (or None to auto-init)
         synthesis_agent : Pre-built SynthesisAgent (or None to auto-init)
+        vision_agent    : Pre-built VisionAgent (or None to auto-init)
         chroma_store    : Pre-built ChromaStore (or None to auto-init)
 
     Returns:
@@ -94,8 +110,10 @@ def build_workflow(
     sql_ag          = sql_agent       or SQLAgent()
     rag_ag          = rag_agent       or RAGAgent(store=store)
     synth_ag        = synthesis_agent or SynthesisAgent()
+    vision_ag       = vision_agent    or VisionAgent()
 
     # ── Create node functions with agents injected ─────────────────────────
+    vision_node_fn  = make_vision_node(vision_ag)
     sql_node_fn     = make_sql_node(sql_ag)
     rag_node_fn     = make_rag_node(rag_ag)
     synthesis_fn    = make_synthesis_node(synth_ag)
@@ -104,14 +122,24 @@ def build_workflow(
     graph = StateGraph(ProcurementState)
 
     # Add nodes
+    graph.add_node("vision_node",     vision_node_fn)
     graph.add_node("guardrail_node",  guardrail_node)
     graph.add_node("classify_node",   classify_node)
     graph.add_node("sql_node",        sql_node_fn)
     graph.add_node("rag_node",        rag_node_fn)
     graph.add_node("synthesis_node",  synthesis_fn)
 
-    # Entry point — guardrail gate runs first, before anything else
-    graph.add_edge(START, "guardrail_node")
+    # Entry point — vision extraction runs first (no-op if no image attached),
+    # then the guardrail gate, before anything else
+    graph.add_edge(START, "vision_node")
+
+    graph.add_conditional_edges(
+        "vision_node",
+        route_after_vision,
+        {
+            "guardrail_node": "guardrail_node",
+        }
+    )
 
     # Conditional routing after the guardrail gate
     graph.add_conditional_edges(
@@ -158,15 +186,25 @@ def build_workflow(
 
 # ── Runner helper ─────────────────────────────────────────────────────────────
 
-def run_query(workflow, question: str, trace_id: str = None) -> ProcurementState:
+def run_query(
+    workflow,
+    question   : str,
+    trace_id   : str   = None,
+    image_data : bytes = None,
+) -> ProcurementState:
     """
     Run a single question through the compiled workflow.
 
     Args:
-        workflow : Compiled LangGraph runnable (from build_workflow())
-        question : Natural language procurement question
-        trace_id : Optional trace id to correlate this run's steps in
-                   observability/tracer.py. Auto-generated if not given.
+        workflow   : Compiled LangGraph runnable (from build_workflow())
+        question   : Natural language procurement question
+        trace_id   : Optional trace id to correlate this run's steps in
+                     observability/tracer.py. Auto-generated if not given.
+        image_data : Optional raw bytes of an uploaded invoice/PO image.
+                     When set, vision_node extracts structured fields from
+                     it and folds them into the question before guardrails/
+                     classification/routing run. Omit or pass None for a
+                     normal text-only query (unchanged behaviour).
 
     Returns:
         Final ProcurementState with all fields populated (including
@@ -176,7 +214,7 @@ def run_query(workflow, question: str, trace_id: str = None) -> ProcurementState
     trace_id = trace_id or new_trace_id()
 
     logger.info(f"\n{'─'*60}")
-    logger.info(f"QUERY: {question}  [trace_id={trace_id}]")
+    logger.info(f"QUERY: {question}  [trace_id={trace_id}]" + (" [+image]" if image_data else ""))
     logger.info(f"{'─'*60}")
 
     t0 = time.time()
@@ -186,6 +224,7 @@ def run_query(workflow, question: str, trace_id: str = None) -> ProcurementState
         "trace_id"          : trace_id,
         "errors"            : [],
         "guardrail_blocked" : False,
+        "image_data"        : image_data,
     }
 
     final_state = workflow.invoke(initial_state)
@@ -262,7 +301,8 @@ def print_graph_structure(workflow):
     """Print the graph node/edge structure for debugging."""
     print("\nGRAPH STRUCTURE:")
     print("  START")
-    print("    └──► guardrail_node")
+    print("    └──► vision_node  (no-op unless an image is attached)")
+    print("             └──► guardrail_node")
     print("             ├──[blocked]──────────────────────────────────────► END")
     print("             └──[clean]──► classify_node")
     print("                              ├──[sql]────► sql_node ──────────────────► synthesis_node ──► END")
