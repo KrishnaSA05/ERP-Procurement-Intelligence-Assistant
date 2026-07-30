@@ -148,6 +148,29 @@ Also persisted to `logs/traces.jsonl` (rotated at 10MB, 7-day retention) for any
 
 ---
 
+## Vision Agent (VLM)
+
+**Agent 4** (`src/agents/vision_agent.py`) adds image understanding on top of the text pipeline above, via a small dual-backend VLM client (`src/agents/vlm_client.py`) that mirrors the Groq/Bedrock split used everywhere else in this repo:
+
+| | Local (Dev) | Production (AWS) |
+|---|---|---|
+| **VLM** | Groq — `qwen/qwen3.6-27b` (same `GROQ_API_KEY`, same `ChatGroq` client already used for text) | Amazon Bedrock — Claude (already multimodal, same account as the text LLM) |
+
+It does two things:
+
+**1. Invoice/PO image queries.** Attach a photo of an invoice or purchase order alongside a question (via the Streamlit file uploader, or `image_base64` on `POST /query`) and the Vision Agent extracts vendor, PO number, line items, date, and total as structured JSON. This runs as a new `vision_node`, positioned **before** the guardrail gate — it folds a compact summary of the extracted fields into the question text itself, so guardrails, the query classifier, the SQL agent, the RAG agent, and the synthesis agent all see one enriched question and needed **zero changes**. Ask something like *"Does this match our records?"* with an invoice photo attached, and it naturally routes to hybrid — checking the PO in Postgres and any relevant contract terms.
+
+**2. Scanned-document rescue during ingestion.** `pdf_loader.py` previously dropped any PDF page yielding under 50 characters of extracted text, assuming it was scanned or blank. Now (`src/ingestion/vlm_ocr.py`), such pages are rasterized and transcribed by the VLM instead — signature pages, stamped approvals, and scanned contract addenda make it into the chunker/embedder/ChromaDB pipeline rather than being silently lost. Controlled via `VLM_OCR_ENABLED` in `.env` (set to `false` to restore the original skip-only behaviour).
+
+```bash
+# Extract fields from an invoice image directly (bypasses the API/UI)
+python src/agents/vision_agent.py path/to/invoice.jpg
+```
+
+> `qwen/qwen3.6-27b` is currently served by Groq as a **preview** model — fine for dev/demo, but Groq's vision lineup has churned through a few model names before (Llama 3.2 Vision → Llama 4 Scout → Qwen3.6). If Groq deprecates it, only `GROQ_VLM_MODEL` in `.env` needs to change.
+
+---
+
 ## RAGAS Evaluation Results
 
 | Metric | Score |
@@ -404,8 +427,28 @@ erp-procurement-intelligence/
 | ERP tables | Synthetic (Faker) | ~1,200 rows | Vendors, POs, invoices, spend — realistic domain logic |
 | Vendor contracts | Public-domain PDFs | 3 contracts, 13 chunks | Penalty, payment, termination clauses |
 | Procurement policy | Public-domain PDF | 1 document, 5 chunks | Approval thresholds, compliance rules |
+| Invoice/PO images | Synthetic (rendered + jittered) | 5 matching, 3 mismatched, 2 no-match | For testing the Vision Agent — see below |
 
-Synthetic ERP + real public-domain contract templates mirrors consulting pre-sales practice: realistic data before client data is available under NDA.
+Synthetic ERP + real public-domain contract templates mirrors consulting pre-sales practice: realistic data before client data is available under NDA. Invoice/PO photos are synthetic for the same reason contracts couldn't be — real invoices are proprietary/PII and no public-domain equivalent exists.
+
+**Generating test data for the Vision Agent:**
+
+```bash
+# Seed Postgres first if you haven't already (needed for the "matching" category)
+python data/synthetic/generate_erp_data.py
+
+# Then generate invoice/PO test images
+python data/synthetic/generate_invoice_images.py
+#   data/synthetic/invoices/matching/    — 5 images, fields pulled from real seeded PO/invoice rows
+#   data/synthetic/invoices/mismatched/  — 3 images, same shape but a deliberately wrong total
+#   data/synthetic/invoices/no_match/    — 2 images, a vendor/PO that doesn't exist in the ERP
+#   data/synthetic/invoices/manifest.json — ground truth for every generated image
+
+# Score extraction accuracy against that ground truth
+python src/evaluation/vision_eval.py
+```
+
+Try a `matching/` image in Streamlit with *"Does this match our records?"* to see the full hybrid flow (Vision Agent → SQL cross-check → synthesis) end-to-end, then try a `mismatched/` one to confirm it flags the discrepancy instead of agreeing.
 
 ---
 
