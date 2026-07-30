@@ -322,9 +322,17 @@ for msg in st.session_state.messages:
         if msg["role"] == "user":
             st.markdown(msg["content"])
         else:
-            # Assistant message — render full response card
+            # Assistant message — render full response card.
+            # FIX: _render_answer() has no return value (implicitly None).
+            # Calling it as a bare top-level statement made Streamlit's
+            # "magic commands" feature auto-write that None to the page —
+            # that's the stray "None" that was appearing under every
+            # response. Assigning to a throwaway variable suppresses it.
             data = msg.get("data", {})
-            _render_answer(data) if data else st.markdown(msg["content"])
+            if data:
+                _ = _render_answer(data)
+            else:
+                _ = st.markdown(msg["content"])
 
 
 # ── Input ─────────────────────────────────────────────────────────────────────
@@ -369,7 +377,9 @@ if question:
             if not data.get("latency_ms"):
                 data["latency_ms"] = elapsed
 
-            _render_answer(data)
+            # FIX: same magic-command gotcha as the history replay loop above —
+            # assign the (None) return value instead of leaving it bare.
+            _ = _render_answer(data)
 
             st.session_state.messages.append({
                 "role"   : "assistant",
