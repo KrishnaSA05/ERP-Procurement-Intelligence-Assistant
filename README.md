@@ -1,39 +1,54 @@
 # ERP & Procurement Intelligence Assistant
 
-> **Agentic RAG system** that answers cross-source procurement questions by routing between a **SQL agent** (structured ERP data) and a **RAG agent** (vendor contracts + policy documents), synthesising both into a single cited business response — hardened with input guardrails, LLM gateway resilience (retry + fallback), and native request tracing.
+> **Agentic multimodal RAG system** that answers cross-source procurement questions — text or photo — by routing between a **SQL agent** (structured ERP data), a **RAG agent** (vendor contracts + policy documents), and a **Vision agent** (invoice/PO photos), synthesising results into a single cited business response — hardened with input guardrails, LLM gateway resilience (retry + fallback), and native request tracing.
+
+Built as an AI/ML portfolio project targeting enterprise consulting roles (Capgemini, Infosys, Accenture, Deloitte).
+
+**What this demonstrates:**
+- **Agentic orchestration** — LangGraph state machine with conditional routing across 6 agents, not a single prompt-and-pray chain
+- **Multimodal AI** — a Vision (VLM) agent that reads a photographed invoice and cross-checks it against live ERP data, with a real dual-backend (Groq / Bedrock) production strategy
+- **Production-shaped engineering, not just a notebook** — retry/fallback gateway, input guardrails, native request tracing, environment-aware backend switching (`APP_ENV=development|production`, zero code changes)
+- **Evaluation discipline** — RAGAS metrics for the RAG pipeline, a custom field-accuracy eval for the Vision pipeline, both against synthetic ground truth
+- **Debugging real integration bugs**, not just demos — see [Key Engineering Decisions #9](#key-engineering-decisions) for a genuine cross-system data-format bug found and fixed during manual testing
 
 ---
 
 ## What It Does
 
-Ask it a question in plain English. It figures out where to look, queries the right sources, and returns a cited business answer — in under 2 seconds for SQL queries, ~15 seconds for document retrieval.
+Ask it a question in plain English, optionally with a photo attached. It figures out where to look, queries the right sources, and returns a cited business answer — in under 2 seconds for SQL queries, ~15 seconds for document retrieval.
 
 | Question | What happens |
 |---|---|
 | *"Which vendor category has the highest average PO value?"* | Routes to SQL → queries PostgreSQL → narrates result |
 | *"What are the payment terms in the Alpha Tech contract?"* | Routes to RAG → retrieves contract chunks → cites sources |
 | *"Summarize our IT Services spending and any relevant contract obligations"* | Routes to Hybrid → runs both → Synthesis Agent merges into one answer |
+| *"Does this match our records?"* + a photo of an invoice | Vision Agent extracts vendor/PO/total from the image → routes to Hybrid → SQL cross-checks the PO → flags a match or a discrepancy |
 
 ---
 
 ## Architecture
 
 ```
-User Query
+User Query (+ optional invoice/PO photo)
     │
     ▼
-┌──────────────────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────────────────┐
 │                    LangGraph Orchestrator                        │
 │                                                                  │
 │  ┌──────────────────┐                                            │
-│  │  Guardrail Gate  │  ── fast-path rule engine (regex)          │
-│  │  (Agent 0)       │  ── LLM fallback for ambiguous queries     │
+│  │  Vision Agent     │  ── no-op if no image attached            │
+│  │  (Agent 4)        │  ── else: extracts vendor/PO/total via    │
+│  └────────┬─────────┘     VLM, folds it into the question text  │
+│           ▼                                                     │
+│  ┌──────────────────┐                                            │
+│  │  Guardrail Gate   │  ── fast-path rule engine (regex)         │
+│  │  (Agent 0)        │  ── LLM fallback for ambiguous queries    │
 │  └────────┬─────────┘     blocks off-topic / jailbreak / unsafe  │
 │           │  clean → continue   |   blocked → refusal, END       │
-│           ▼                                                      │
+│           ▼                                                     │
 │  ┌──────────────────┐                                            │
-│  │  Query Classifier│  ── fast-path rule engine (regex)          │
-│  │  (Agent 1)       │  ── LLM fallback for ambiguous queries     │
+│  │  Query Classifier │  ── fast-path rule engine (regex)         │
+│  │  (Agent 1)        │  ── LLM fallback for ambiguous queries    │
 │  └────────┬─────────┘                                            │
 │           │  route: sql | rag | hybrid                           │
 │      ┌────┴────────┐                                             │
@@ -51,7 +66,7 @@ User Query
 │   invoices,     policy PDFs)                                     │
 │   spend)                                                         │
 │       │            │                                             │
-│       └─────┬──────┘                                             │
+│       └─────┬───────┘                                            │
 │             ▼                                                    │
 │  ┌──────────────────┐                                            │
 │  │ Synthesis Agent  │  merges SQL narrative + RAG citations      │
@@ -59,8 +74,8 @@ User Query
 │  └──────────────────┘                                            │
 │                                                                  │
 │  Every node above is wrapped with request tracing (trace_id) and │
-│  every LLM call passes through a retry+fallback gateway.         │
-└──────────────────────────────────────────────────────────────────┘
+│  every LLM/VLM call passes through a retry+fallback gateway.    │
+└─────────────────────────────────────────────────────────────────┘
          │
          ▼
   FastAPI /query endpoint
@@ -68,6 +83,8 @@ User Query
          ▼
   Streamlit Chat UI
 ```
+
+> **Note on agent numbering:** agents are numbered by when they were added to the system (0 → guardrails, 1 → classifier, 2a/2b → SQL/RAG, 3 → synthesis, 4 → vision), not by execution order. The Vision Agent is "Agent 4" but runs **first** in the graph — it's a pre-processing step that enriches the question text, so guardrails/classifier/SQL/RAG/synthesis all needed zero code changes to support it.
 
 ---
 
@@ -77,6 +94,7 @@ User Query
 |---|---|---|
 | **LLM** | Groq — `openai/gpt-oss-20b` | Amazon Bedrock — Claude Haiku |
 | **LLM Gateway** | Retry (tenacity) + fallback to `openai/gpt-oss-120b` | Retry + fallback to Claude Sonnet |
+| **Vision (VLM)** | Groq — `qwen/qwen3.6-27b` (same client/key as text LLM) | Amazon Bedrock — Claude (natively multimodal) |
 | **Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` | Amazon Bedrock Titan Embed v2 |
 | **Orchestration** | LangGraph 0.2.28 | LangGraph 0.2.28 |
 | **Guardrails** | Native regex + LLM gate (off-topic / jailbreak / unsafe) | Same |
@@ -87,7 +105,7 @@ User Query
 | **API** | FastAPI + Uvicorn | FastAPI on EC2 |
 | **UI** | Streamlit | Streamlit on EC2 |
 | **Ingestion trigger** | Manual CLI | AWS Lambda (S3 event) |
-| **Evaluation** | RAGAS | RAGAS |
+| **Evaluation** | RAGAS (RAG) + custom field-accuracy eval (Vision) | RAGAS (RAG) + custom field-accuracy eval (Vision) |
 
 > Environment is switched automatically via `APP_ENV=development|production` in `.env` — no code changes needed between local and AWS.
 
@@ -107,9 +125,13 @@ User Query
 
 **6. Guardrail gate runs before routing** — Mirrors the classifier's own two-tier design (regex fast-path → LLM fallback for anything ambiguous) rather than pulling in a separate guardrails framework, since nothing else in this repo depends on one. Blocks off-topic, prompt-injection/jailbreak, and unsafe requests (destructive SQL, credential probing) before they ever reach the classifier or agents — a blocked request short-circuits straight to the final response with zero downstream LLM calls.
 
-**7. LLM Gateway — retry + fallback, transparent to every call site** — `get_llm()` returns every LLM client wrapped in a `ResilientLLM` object instead of the raw LangChain client. Transient errors (rate limits, timeouts) get retried with exponential backoff on the primary model; if that's still failing, one attempt goes to a separate fallback model on a different capacity tier (`openai/gpt-oss-120b` in dev, Claude Sonnet in prod). Every existing `llm.invoke(...)` call across all 5 agents gets this for free — no call site needed to change.
+**7. LLM Gateway — retry + fallback, transparent to every call site** — `get_llm()` returns every LLM client wrapped in a `ResilientLLM` object instead of the raw LangChain client. Transient errors (rate limits, timeouts) get retried with exponential backoff on the primary model; if that's still failing, one attempt goes to a separate fallback model on a different capacity tier (`openai/gpt-oss-120b` in dev, Claude Sonnet in prod). Every existing `llm.invoke(...)` call across all 5 gateway-wrapped agents gets this for free — no call site needed to change. (The Vision Agent calls its VLM directly rather than through this gateway — see the note in Key Engineering Decision #9.)
 
 **8. Native request tracing, no external SaaS dependency** — Every graph node is wrapped with a `@traced_node` decorator that records per-node timing and its key decision (route chosen, guardrail category, success/failure), correlated by a `trace_id` that flows through the whole request. Kept native (loguru + an in-memory ring buffer, no LangSmith/Logfire account required) so anyone cloning this repo can see full request traces via `GET /traces/{trace_id}` without signing up for anything — LangSmith is still available as a zero-code opt-in via env vars if you want a hosted trace UI instead.
+
+**9. Vision Agent as a pre-processing node, not a fourth route** — Adding image understanding could have meant a new `vision` branch alongside `sql`/`rag`/`hybrid` in the classifier, touching routing logic everywhere. Instead, `vision_node` runs *before* the guardrail gate: it's a no-op if no image is attached, and if one is, it extracts structured fields via a VLM and folds a compact summary into the question text itself. Guardrails, the classifier, the SQL agent, the RAG agent, and the synthesis agent needed **zero changes** to support multimodal input — they just see a slightly richer question. Same dual-backend pattern as the text LLM (Groq dev / Bedrock prod), reusing the existing `GROQ_API_KEY` rather than standing up a new service. Trade-off made deliberately: `vlm_client.py` calls its backend directly rather than through `llm_gateway.py`'s retry/fallback wrapper, since image uploads are on-demand and user-facing (a failed call surfaces immediately, so a silent multi-second retry loop trades away responsiveness rather than adding resilience) — unlike the always-on text pipeline, where a transient blip retrying invisibly is worth the extra second.
+
+**10. A real integration bug, found and fixed by actually testing it** — Manual end-to-end testing (attach a real invoice photo → ask "does this match our records?") surfaced a genuine cross-system format mismatch: the ERP schema's `po_id`/`invoice_id` columns are plain integers (`96`), but the Vision Agent extracts references formatted the way real invoices print them (`PO-00096`). The text-to-SQL model had no way to bridge that gap, and on retry it returned prose instead of SQL — tripping the "only SELECT statements" safety guard rather than silently returning wrong data. Fixed at the source rather than papering over it: `VisionAgentResult.as_context_snippet()` now parses the bare integer itself and hands the SQL agent both forms (`po_number=PO-00096, po_id=96`), backed by an explicit prompt rule and a regression test (`test_context_snippet_surfaces_parsed_po_and_invoice_ids`) so it can't silently regress. Left in here deliberately — it's a more honest signal of engineering process than a README that only shows the happy path.
 
 ---
 
@@ -334,6 +356,14 @@ How much do we spend on logistics and what are the contract payment terms?
 Which vendors have overdue invoices and what do contracts say about late payment?
 ```
 
+### Vision Agent (attach an invoice/PO photo)
+```
+Does this match our records?                    → attach data/synthetic/invoices/matching/*.jpg
+Is this invoice correctly billed?                → attach data/synthetic/invoices/mismatched/*.jpg
+Do we have this vendor in our records?            → attach data/synthetic/invoices/no_match/*.jpg
+```
+See [Data](#data) below for how to generate these test images and score extraction accuracy.
+
 ### Guardrail test queries (should be blocked, not answered)
 ```
 Tell me a joke about accountants.                          → off_topic
@@ -350,10 +380,12 @@ Check `guardrail_blocked` / `guardrail_category` in the `/query` response, or lo
 erp-procurement-intelligence/
 ├── data/
 │   ├── synthetic/
-│   │   └── generate_erp_data.py     # Faker-based ERP seed data
-│   ├── contracts/                   # vendor contract PDFs
-│   ├── policies/                    # procurement policy PDFs
-│   └── sample_queries.json          # RAGAS evaluation test set
+│   │   ├── generate_erp_data.py       # Faker-based ERP seed data
+│   │   ├── generate_invoice_images.py # synthetic invoice/PO test images for the Vision Agent
+│   │   └── invoices/                  # generated test images + manifest.json (ground truth)
+│   ├── contracts/                     # vendor contract PDFs
+│   ├── policies/                      # procurement policy PDFs
+│   └── sample_queries.json            # RAGAS evaluation test set
 │
 ├── src/
 │   ├── agents/
@@ -363,12 +395,15 @@ erp-procurement-intelligence/
 │   │   ├── query_classifier.py      # regex fast-path + LLM fallback router
 │   │   ├── sql_agent.py             # NL → SQL → execute → narrate
 │   │   ├── rag_agent.py             # embed → retrieve → rerank → answer
-│   │   └── synthesis_agent.py       # merge SQL + RAG into one response
+│   │   ├── synthesis_agent.py       # merge SQL + RAG into one response
+│   │   ├── vlm_client.py            # VLM factory — Groq vision (dev) / Bedrock vision (prod)
+│   │   └── vision_agent.py          # image → structured vendor/PO/total JSON (Agent 4)
 │   ├── data/
 │   │   ├── schema.py                # SQLAlchemy ORM models
 │   │   └── db_loader.py             # connection factory + health check
 │   ├── ingestion/
-│   │   ├── pdf_loader.py            # PDF → Document objects
+│   │   ├── pdf_loader.py            # PDF → Document objects (+ VLM-OCR rescue for scanned pages)
+│   │   ├── vlm_ocr.py               # rasterize + VLM-transcribe scanned/image-only PDF pages
 │   │   ├── chunker.py               # recursive text splitter
 │   │   ├── embedder.py              # MiniLM (dev) / Titan (prod)
 │   │   └── ingest_pipeline.py       # orchestrates load→chunk→embed→upsert
@@ -376,23 +411,24 @@ erp-procurement-intelligence/
 │   │   └── chroma_store.py          # ChromaDB client wrapper
 │   ├── graph/
 │   │   ├── langgraph_workflow.py    # LangGraph DAG definition
-│   │   ├── nodes.py                 # one function per graph node
+│   │   ├── nodes.py                 # one function per graph node (incl. vision_node)
 │   │   └── state.py                 # TypedDict workflow state
 │   ├── observability/
 │   │   └── tracer.py                # @traced_node decorator, in-memory + JSONL trace store
 │   └── evaluation/
-│       ├── ragas_eval.py            # RAGAS metrics runner
+│       ├── ragas_eval.py            # RAGAS metrics runner (RAG agent)
+│       ├── vision_eval.py           # field-accuracy eval (Vision agent) against manifest.json
 │       └── eval_runner.py           # batch evaluation harness
 │
 ├── api/
 │   ├── main.py                      # FastAPI app — /query /health /history
-│   └── models.py                    # Pydantic request/response schemas
+│   └── models.py                    # Pydantic request/response schemas (incl. image_base64)
 │
 ├── app/
-│   └── streamlit_app.py             # Chat UI with route badges + citations
+│   └── streamlit_app.py             # Chat UI — route badges, citations, invoice image uploader
 │
 ├── tests/
-│   └── test_smoke.py                # guardrails, gateway, tracer, API smoke tests
+│   └── test_smoke.py                # guardrails, gateway, tracer, vision agent, API smoke tests
 │
 ├── aws/
 │   ├── ec2_setup.sh                 # EC2 bootstrap script
