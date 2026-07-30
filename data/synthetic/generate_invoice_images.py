@@ -15,9 +15,10 @@ Vision Agent + hybrid SQL cross-check flow:
   matching/    — invoice fields exactly match a real seeded PO/vendor row
                  in Postgres (pulled live from the DB). Use these to test
                  "does this match our records?" end-to-end.
-  mismatched/  — same shape, but the printed total is deliberately wrong.
-                 Use these to confirm the assistant flags a discrepancy
-                 instead of agreeing blindly.
+  mismatched/  — same real seeded PO/vendor/invoice reference, but the
+                 printed total is deliberately wrong. Use these to confirm
+                 the assistant flags a discrepancy instead of agreeing
+                 blindly. (Also pulled live from Postgres — see note below.)
   no_match/    — a fictional vendor/PO that doesn't exist in the ERP at
                  all. Use these to confirm the assistant says "not found"
                  rather than hallucinating a match.
@@ -32,10 +33,11 @@ consumed by src/evaluation/vision_eval.py to score extraction accuracy,
 the vision-side equivalent of the RAGAS eval for the RAG agent.
 
 Run:
-    # Needs Postgres seeded first (see generate_erp_data.py) for matching/:
+    # Needs Postgres seeded first (see generate_erp_data.py) for both
+    # matching/ and mismatched/ — both need real rows to be meaningful:
     python data/synthetic/generate_invoice_images.py
 
-    # Or skip the DB-dependent category entirely:
+    # Or skip both DB-dependent categories and only generate no_match/:
     python data/synthetic/generate_invoice_images.py --no-db
 """
 
@@ -160,10 +162,16 @@ def _line_items_for_total(total: float) -> list:
 
 # ── Category generators ────────────────────────────────────────────────────────
 
-def generate_matching(n: int, manifest: list):
+def generate_matching(n: int, manifest: list) -> set:
     """
     Pulls real seeded PO/vendor/invoice rows from Postgres, so these images
     are guaranteed to cross-check successfully against the ERP data.
+
+    Returns the set of invoice_ids used, so generate_mismatched() can avoid
+    picking the same invoice (which would otherwise produce a matching/
+    image and a mismatched/ image quoting two different totals for the
+    same invoice number — confusing rather than a real functional bug, but
+    easy to avoid).
     """
     try:
         from sqlalchemy import create_engine, text
@@ -186,7 +194,7 @@ def generate_matching(n: int, manifest: list):
             f"  [matching] Could not reach Postgres ({e}) — skipping matching/ "
             f"(seed the DB first: python data/synthetic/generate_erp_data.py)"
         )
-        return
+        return set()
 
     for row in rows:
         po_number      = f"PO-{row['po_id']:05d}"
@@ -210,25 +218,65 @@ def generate_matching(n: int, manifest: list):
             },
         })
     logger.success(f"  ✓ Generated {len(rows)} matching/ invoice images from real ERP rows")
+    return {row["invoice_id"] for row in rows}
 
 
-def generate_mismatched(n: int, manifest: list):
+def generate_mismatched(n: int, manifest: list, exclude_invoice_ids: set = frozenset()):
     """
-    Same vendor/PO reference shape, but the printed total is deliberately
-    wrong — tests that the assistant flags a discrepancy rather than
-    agreeing blindly.
+    Pulls a real seeded PO/vendor/invoice row from Postgres — same as
+    generate_matching() — but prints a deliberately wrong total. This is
+    what actually exercises the "record exists, but the number is wrong"
+    discrepancy-flagging path: the vendor/PO/invoice references must be
+    real, or the SQL agent has nothing to find a mismatch against and this
+    category degenerates into a second no_match/ case.
+
+    (Previously this fabricated a fake vendor + a PO/invoice number outside
+    the real seeded ID range (1-500ish), so the SQL agent could never find
+    a row at all — every "mismatched" query silently fell through to "no
+    records found", identical to no_match/. Fixed to reuse real rows.)
+
+    exclude_invoice_ids: invoice_ids already used by generate_matching(),
+    so the same invoice never appears in both matching/ and mismatched/
+    with two different "true" totals.
     """
-    for _ in range(n):
-        vendor_name    = fake.company()
-        po_number      = f"PO-{random.randint(10000, 99999)}"
-        invoice_number = f"INV-{random.randint(10000, 99999)}"
-        real_total     = round(random.uniform(500, 50000), 2)
+    try:
+        from sqlalchemy import create_engine, text
+        database_url = os.getenv(
+            "DATABASE_URL", "postgresql://erp_user:erp_pass@localhost:5432/erp_procurement"
+        )
+        engine = create_engine(database_url)
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT i.invoice_id, i.amount AS invoice_amount, i.due_date,
+                       p.po_id, v.name AS vendor_name
+                FROM invoices i
+                JOIN purchase_orders p ON i.po_id = p.po_id
+                JOIN vendors v ON p.vendor_id = v.vendor_id
+                WHERE i.invoice_id NOT IN :excluded
+                ORDER BY random()
+                LIMIT :n
+            """), {
+                "n": n,
+                # asyncpg/psycopg2 need a non-empty tuple for NOT IN; (-1,) never matches a real id
+                "excluded": tuple(exclude_invoice_ids) if exclude_invoice_ids else (-1,),
+            }).mappings().all()
+    except Exception as e:
+        logger.warning(
+            f"  [mismatched] Could not reach Postgres ({e}) — skipping mismatched/ "
+            f"(seed the DB first: python data/synthetic/generate_erp_data.py)"
+        )
+        return
+
+    for row in rows:
+        po_number      = f"PO-{row['po_id']:05d}"
+        invoice_number = f"INV-{row['invoice_id']:05d}"
+        real_total     = float(row["invoice_amount"])
         printed_total  = round(real_total * random.choice([1.15, 0.85, 1.3]), 2)
-        invoice_date   = fake.date_between(start_date="-90d", end_date="today").isoformat()
+        invoice_date   = (row["due_date"] - timedelta(days=random.randint(10, 30))).isoformat()
         line_items     = _line_items_for_total(printed_total)
 
         out_path = OUT_DIR / "mismatched" / f"invoice_{invoice_number}.jpg"
-        render_invoice_image(vendor_name, po_number, invoice_number,
+        render_invoice_image(row["vendor_name"], po_number, invoice_number,
                               invoice_date, line_items, printed_total, out_path)
 
         manifest.append({
@@ -236,16 +284,16 @@ def generate_mismatched(n: int, manifest: list):
             "category"      : "mismatched",
             "expected_match": False,
             "note"          : (
-                f"Printed total (${printed_total:,.2f}) intentionally differs "
-                f"from the 'true' amount (${real_total:,.2f}) it was derived from."
+                f"Real ERP total for this invoice is ${real_total:,.2f}; printed "
+                f"total (${printed_total:,.2f}) is intentionally wrong."
             ),
             "ground_truth"  : {
-                "vendor_name": vendor_name, "po_number": po_number,
+                "vendor_name": row["vendor_name"], "po_number": po_number,
                 "invoice_number": invoice_number, "invoice_date": invoice_date,
                 "total_amount": printed_total, "line_items": line_items,
             },
         })
-    logger.success(f"  ✓ Generated {n} mismatched/ invoice images")
+    logger.success(f"  ✓ Generated {len(rows)} mismatched/ invoice images from real ERP rows (wrong total printed)")
 
 
 def generate_no_match(n: int, manifest: list):
@@ -294,9 +342,15 @@ def main():
     print("=" * 60)
 
     manifest = []
+    used_invoice_ids = set()
     if not args.no_db:
-        generate_matching(args.n_matching, manifest)
-    generate_mismatched(args.n_mismatched, manifest)
+        used_invoice_ids = generate_matching(args.n_matching, manifest)
+        generate_mismatched(args.n_mismatched, manifest, exclude_invoice_ids=used_invoice_ids)
+    else:
+        logger.warning(
+            "  --no-db set — skipping matching/ AND mismatched/ (both need real "
+            "Postgres rows to be meaningful; only no_match/ works without a DB)"
+        )
     generate_no_match(args.n_no_match, manifest)
 
     manifest_path = OUT_DIR / "manifest.json"
