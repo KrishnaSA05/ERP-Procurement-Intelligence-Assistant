@@ -2,8 +2,6 @@
 
 > **Agentic RAG system** that answers cross-source procurement questions by routing between a **SQL agent** (structured ERP data) and a **RAG agent** (vendor contracts + policy documents), synthesising both into a single cited business response — hardened with input guardrails, LLM gateway resilience (retry + fallback), and native request tracing.
 
-Built as an AI/ML portfolio project targeting enterprise consulting roles (Capgemini, Infosys, Accenture, Deloitte).
-
 ---
 
 ## What It Does
@@ -24,18 +22,18 @@ Ask it a question in plain English. It figures out where to look, queries the ri
 User Query
     │
     ▼
-┌─────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────┐
 │                    LangGraph Orchestrator                        │
 │                                                                  │
 │  ┌──────────────────┐                                            │
-│  │  Guardrail Gate   │  ── fast-path rule engine (regex)         │
-│  │  (Agent 0)        │  ── LLM fallback for ambiguous queries    │
+│  │  Guardrail Gate  │  ── fast-path rule engine (regex)          │
+│  │  (Agent 0)       │  ── LLM fallback for ambiguous queries     │
 │  └────────┬─────────┘     blocks off-topic / jailbreak / unsafe  │
 │           │  clean → continue   |   blocked → refusal, END       │
-│           ▼                                                     │
+│           ▼                                                      │
 │  ┌──────────────────┐                                            │
-│  │  Query Classifier │  ── fast-path rule engine (regex)         │
-│  │  (Agent 1)        │  ── LLM fallback for ambiguous queries    │
+│  │  Query Classifier│  ── fast-path rule engine (regex)          │
+│  │  (Agent 1)       │  ── LLM fallback for ambiguous queries     │
 │  └────────┬─────────┘                                            │
 │           │  route: sql | rag | hybrid                           │
 │      ┌────┴────────┐                                             │
@@ -53,7 +51,7 @@ User Query
 │   invoices,     policy PDFs)                                     │
 │   spend)                                                         │
 │       │            │                                             │
-│       └─────┬───────┘                                            │
+│       └─────┬──────┘                                             │
 │             ▼                                                    │
 │  ┌──────────────────┐                                            │
 │  │ Synthesis Agent  │  merges SQL narrative + RAG citations      │
@@ -61,8 +59,8 @@ User Query
 │  └──────────────────┘                                            │
 │                                                                  │
 │  Every node above is wrapped with request tracing (trace_id) and │
-│  every LLM call passes through a retry+fallback gateway.        │
-└─────────────────────────────────────────────────────────────────┘
+│  every LLM call passes through a retry+fallback gateway.         │
+└──────────────────────────────────────────────────────────────────┘
          │
          ▼
   FastAPI /query endpoint
