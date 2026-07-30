@@ -23,6 +23,28 @@ import pdfplumber
 from loguru import logger
 
 
+def _vlm_ocr_enabled() -> bool:
+    """
+    Controls whether scanned/low-text pages get a VLM-OCR rescue attempt
+    (see vlm_ocr_fallback below) instead of being silently dropped like
+    the original behaviour. Defaults on; set VLM_OCR_ENABLED=false in .env
+    to restore the original skip-only behaviour (e.g. no Groq/Bedrock
+    reachable in this environment).
+    """
+    return os.getenv("VLM_OCR_ENABLED", "true").lower() in ("1", "true", "yes")
+
+
+def _vlm_ocr_fallback(path: Path, page_number: int) -> str:
+    """
+    Lazily imports src.ingestion.vlm_ocr (which itself lazily reaches the
+    VLM client) so a dev box with VLM_OCR_ENABLED=false never needs
+    PyMuPDF/Groq/Bedrock reachable just because pdf_loader was imported.
+    """
+    from src.ingestion.vlm_ocr import rasterize_page, vlm_ocr_page
+    image_bytes = rasterize_page(path, page_number)
+    return vlm_ocr_page(image_bytes)
+
+
 # ── Data model ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -35,6 +57,7 @@ class PDFPage:
     source_path : str          # full path
     doc_type    : str          # "contract" | "policy"
     doc_id      : str          # slug derived from filename  e.g. "vendor_contract_techcorp"
+    extraction_method : str = "text"   # "text" (pypdf/pdfplumber) | "vlm_ocr" (VLM rescue)
 
 
 @dataclass
@@ -136,9 +159,33 @@ def load_pdf(
 
     for i, raw_text in enumerate(page_texts):
         text = raw_text.strip()
+        extraction_method = "text"
+
         if len(text) < min_chars_per_page:
-            logger.debug(f"  Skipping page {i+1} (only {len(text)} chars)")
-            continue
+            # Likely a scanned/image-only page (signature page, stamped
+            # approval, scanned addendum). Try a VLM-OCR rescue before
+            # giving up on it, instead of silently dropping it.
+            if _vlm_ocr_enabled():
+                logger.debug(
+                    f"  Page {i+1} has only {len(text)} chars — attempting VLM OCR rescue"
+                )
+                try:
+                    ocr_text = _vlm_ocr_fallback(path, i + 1)
+                except Exception as e:
+                    logger.warning(f"  VLM OCR rescue failed for page {i+1}: {e}")
+                    ocr_text = ""
+
+                if len(ocr_text.strip()) >= min_chars_per_page:
+                    text = ocr_text.strip()
+                    extraction_method = "vlm_ocr"
+                    logger.info(f"  ✓ Page {i+1} rescued via VLM OCR ({len(text)} chars)")
+                else:
+                    logger.debug(f"  Skipping page {i+1} — VLM OCR also yielded too little text")
+                    continue
+            else:
+                logger.debug(f"  Skipping page {i+1} (only {len(text)} chars, VLM OCR disabled)")
+                continue
+
         pages.append(PDFPage(
             text        = text,
             page_number = i + 1,
@@ -147,10 +194,13 @@ def load_pdf(
             source_path = str(path),
             doc_type    = doc_type,
             doc_id      = doc_id,
+            extraction_method = extraction_method,
         ))
 
+    rescued = sum(1 for p in pages if p.extraction_method == "vlm_ocr")
     logger.success(
         f"  ✓ '{path.name}' — {len(pages)}/{total_pages} pages extracted"
+        + (f" ({rescued} via VLM OCR)" if rescued else "")
     )
 
     return PDFDocument(
